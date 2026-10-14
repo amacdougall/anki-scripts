@@ -1,0 +1,29 @@
+# Per-deck readings for names and terms MeCab can't be trusted with, usually
+# character names from the book, manga, or show the deck's words came from.
+#
+# Copy this file to config/deck-readings.yaml and edit it. Keys are Anki deck
+# names (exactly as Anki shows them); each maps a kanji string to its reading
+# in kana. These readings are used by:
+#
+#   generate-furigana.rb      — written as the furigana, and given to the LLM
+#                               reviewer as fixed readings
+#   add-sentence-meanings.rb  — hints for LLM translation (--provider claude/opencode)
+#   generate-gemini-audio.rb  — substituted as kana before speech synthesis
+#   generate-voicevox-audio.rb
+#
+# Matching is a plain substring replace, so prefer full names or distinctive
+# terms over single common kanji.
+
+とらドラ！:
+  # Takasu Ryuuji
+  高須: たかす
+  竜児: りゅうじ
+  # Aisaka Taiga
+  逢坂: あいさか
+  大河: たいが
+
+呪術廻戦:
+  呪霊: じゅれい     # MeCab: しゅれい
+  # Itadori Yuuji
+  虎杖: いたどり
+  悠仁: ゆうじ       # MeCab: ゆうひとし

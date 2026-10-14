@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# transcribe — local speech-to-text via whisper.cpp, used by the reading check
+# in generate-gemini-audio.rb. Set it up with ./setup-whisper.sh.
+#
+# Usage:
+#   bin/transcribe <audio-file> [extra whisper-cli args...]   # transcript on stdout
+#   bin/transcribe --check     # exit 0 if whisper-cli and the model are present
+#
+# Finds whisper-cli at $WHISPER_CLI, then the copy setup-whisper.sh builds
+# under data/whisper/, then on PATH (e.g. Homebrew's whisper-cpp). The model is
+# $WHISPER_MODEL, or data/whisper/ggml-large-v3-turbo.bin.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+WHISPER_DIR="$ROOT/data/whisper"
+MODEL="${WHISPER_MODEL:-$WHISPER_DIR/ggml-large-v3-turbo.bin}"
+
+find_whisper() {
+  if [[ -n "${WHISPER_CLI:-}" ]]; then
+    echo "$WHISPER_CLI"
+  elif [[ -x "$WHISPER_DIR/whisper.cpp/build/bin/whisper-cli" ]]; then
+    echo "$WHISPER_DIR/whisper.cpp/build/bin/whisper-cli"
+  else
+    command -v whisper-cli || true
+  fi
+}
+
+WHISPER="$(find_whisper)"
+
+if [[ "${1:-}" == "--check" ]]; then
+  [[ -n "$WHISPER" && -x "$WHISPER" && -f "$MODEL" ]]
+  exit
+fi
+
+if [[ $# -lt 1 ]]; then
+  echo "usage: transcribe <audio-file> [extra whisper-cli args...]" >&2
+  exit 2
+fi
+if [[ -z "$WHISPER" || ! -x "$WHISPER" ]]; then
+  echo "transcribe: whisper-cli not found (run ./setup-whisper.sh)" >&2
+  exit 1
+fi
+if [[ ! -f "$MODEL" ]]; then
+  echo "transcribe: model not found: $MODEL (run ./setup-whisper.sh)" >&2
+  exit 1
+fi
+
+input="$1"; shift
+if [[ ! -f "$input" ]]; then
+  echo "transcribe: no such file: $input" >&2
+  exit 1
+fi
+
+# Write the transcript to a temp basename, echo it, clean up.
+tmp="$(mktemp -t transcribe.XXXXXX)"
+trap 'rm -f "$tmp" "$tmp.txt"' EXIT
+
+"$WHISPER" -m "$MODEL" -f "$input" -nt -otxt -of "$tmp" "$@" >&2
+# Trim leading/trailing whitespace that whisper emits.
+sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$tmp.txt"

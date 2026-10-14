@@ -1,0 +1,43 @@
+---
+# Example input for add-cards.rb. Copy it somewhere (temp/ is gitignored) and
+# edit; then run: ./add-cards.rb temp/incoming-words.yaml
+#
+# target_deck is required (or pass --target-deck, which overrides it). The deck
+# must already exist in Anki. A word already on a Kaishi 1.5k card in any deck
+# (same word and reading) is skipped.
+target_deck: My Novel Vocab
+
+entries:
+  # Only `word` is required. Everything else is optional:
+  #   reading           kana reading; looked up in JMdict if omitted
+  #   word_meaning      English meaning; looked up in JMdict if omitted
+  #   sentence          the sentence you found the word in; if omitted,
+  #                     generate one later with generate-sentences.rb
+  #   sentence_meaning  translation of `sentence`; add-sentence-meanings.rb
+  #                     fills it in if omitted
+  #   note              goes in the Notes field
+
+  # Bare words: reading and meaning come from JMdict.
+  - word: 展望台
+  - word: 彗星
+
+  # Give a reading when the word has several and you want a specific one.
+  - word: 一日
+    reading: ついたち
+    word_meaning: first day of the month
+
+  # Give a meaning when JMdict's would be wrong for your context.
+  - word: 完了
+    word_meaning: done (as in a task-tracker status)
+
+  # Keep the sentence you found the word in; it becomes the card's example.
+  - word: 物置
+    sentence: 古い写真は物置の奥にしまってある。
+
+  # Two words from the same sentence each get their own card.
+  - word: 夕立
+    sentence: 夕立が止んだので、傘を持たずに駅まで歩いた。
+  - word: 止む
+    reading: やむ
+    sentence: 夕立が止んだので、傘を持たずに駅まで歩いた。
+    note: (from chapter 3)
