@@ -116,12 +116,12 @@ class ScriptCLI
   end
 
   # Checks that Anki is running, the Kaishi note type exists and the target deck
-  # exists, printing what it found. Exits EXIT_ERROR if any check fails.
-  # Returns a connected AnkiConnect.
-  def connect!
+  # exists, printing what it found unless quiet.
+  # Exits EXIT_ERROR if any check fails. Returns a connected AnkiConnect.
+  def connect!(quiet: false)
     AnkiConnect.require_running!
     db = AnkiConnect.new.connect
-    ProgressReporter.success('Connected to Anki via AnkiConnect')
+    ProgressReporter.success('Connected to Anki via AnkiConnect') unless quiet
 
     unless db.find_note_type_id(Kaishi::NOTE_TYPE_NAME)
       ProgressReporter.error("Note type not found: #{Kaishi::NOTE_TYPE_NAME}")
@@ -133,8 +133,10 @@ class ScriptCLI
       ProgressReporter.error("Deck not found: #{deck}")
       exit EXIT_ERROR
     end
-    puts "Target deck: #{deck}" if deck
-    puts ''
+    unless quiet
+      puts "Target deck: #{deck}" if deck
+      puts ''
+    end
     db
   end
 

@@ -1,109 +1,32 @@
 #!/usr/bin/env ruby
 
-require 'optparse'
-require_relative 'lib/anki_connect'
-require_relative 'lib/kaishi_fields'
-require_relative 'lib/progress_reporter'
+require_relative 'lib/script_cli'
+require_relative 'lib/deck_status'
 
-# Note type to target across all decks
-NOTE_TYPE_NAME = Kaishi::NOTE_TYPE_NAME
+cli = ScriptCLI.new(
+  'strip-word-html.rb',
+  'Strips stray HTML (anything but <ruby> furigana) from the Word, Word Furigana,',
+  'Sentence and Sentence Furigana fields. Reader tools tend to leave it behind.'
+)
+cli.dry_run
+cli.limit('Process only the first N notes with HTML')
+options = cli.parse!
 
-# Parse command-line arguments
-options = {
-  dry_run: false,
-  limit: nil,
-  target_deck: nil
-}
-
-OptionParser.new do |opts|
-  opts.banner = "Usage: strip-word-html.rb [options]"
-  opts.separator ""
-  opts.separator "Strips HTML tags from Word, Word Furigana, Sentence, and Sentence Furigana fields in Anki notes."
-  opts.separator "When --target-deck is given, operates on that deck only."
-  opts.separator "When omitted, operates on all decks except '#{NOTE_TYPE_NAME}'."
-  opts.separator ""
-  opts.separator "Options:"
-
-  opts.on("-d", "--target-deck DECK", "Target a specific deck (default: all decks except '#{NOTE_TYPE_NAME}')") do |deck|
-    options[:target_deck] = deck
-  end
-
-  opts.on("--dry-run", "Preview changes without modifying database") do
-    options[:dry_run] = true
-  end
-
-  opts.on("--limit N", Integer, "Process only first N notes with HTML") do |n|
-    options[:limit] = n
-  end
-
-  opts.on("-h", "--help", "-?", "Show this message") do
-    puts opts
-    exit
-  end
-end.parse!
-
-# Strip HTML tags from text
-def strip_html_tags(text)
-  # Remove all HTML tags except ruby, rt, and rp tags (used for furigana)
-  text.gsub(/<(?!\/?(?:ruby|rt|rp)\b)[^>]+>/, '')
-end
-
-# Check if text contains HTML tags
-def has_html_tags?(text)
-  text.match?(/<[^>]+>/)
-end
-
-# Anki must be running with the AnkiConnect add-on installed.
-AnkiConnect.require_running!
-ProgressReporter.success("Connected to Anki via AnkiConnect")
-puts ""
-
-db = AnkiConnect.new.connect
+db = cli.connect!
 
 begin
-  # Find note type ID
-  puts "Finding note type: #{NOTE_TYPE_NAME}"
-  note_type_id = db.find_note_type_id(NOTE_TYPE_NAME)
-
-  unless note_type_id
-    ProgressReporter.error("Note type not found: #{NOTE_TYPE_NAME}")
-    exit 1
-  end
-
-  if options[:target_deck]
-    # Target a specific deck
-    unless db.find_deck_id(options[:target_deck])
-      ProgressReporter.error("Deck not found: #{options[:target_deck]}")
-      exit 1
-    end
-
-    puts "Targeting deck: #{options[:target_deck]}"
-    all_notes = db.notes_in_deck(options[:target_deck], note_type: NOTE_TYPE_NAME)
-  else
-    # All decks except the curated source deck
-    puts "Targeting all decks except '#{NOTE_TYPE_NAME}'"
-    all_notes = db.notes_in_deck(nil, note_type: NOTE_TYPE_NAME, exclude_deck: NOTE_TYPE_NAME)
-  end
-
-  ProgressReporter.success("Found #{all_notes.size} notes with note type '#{NOTE_TYPE_NAME}'")
+  all_notes = cli.notes(db)
+  ProgressReporter.success("Found #{all_notes.size} #{Kaishi::NOTE_TYPE_NAME} notes")
   puts ""
 
-  # Filter notes that have HTML in word or sentence fields
-  notes_with_html = all_notes.select do |note|
-    word = note[:fields][Kaishi::WORD_IDX] || ''
-    word_furigana = note[:fields][Kaishi::WORD_FURIGANA_IDX] || ''
-    sentence = note[:fields][Kaishi::SENTENCE_IDX] || ''
-    sentence_furigana = note[:fields][Kaishi::SENTENCE_FURIGANA_IDX] || ''
-    has_html_tags?(word) || has_html_tags?(word_furigana) ||
-      has_html_tags?(sentence) || has_html_tags?(sentence_furigana)
-  end
+  notes_with_html = all_notes.select { |note| DeckStatus.needs_stray_html?(note) }
 
   puts "Notes with HTML tags in word/sentence fields: #{notes_with_html.size}"
   puts ""
 
   if notes_with_html.empty?
     puts "No notes need cleaning!"
-    exit 0
+    exit ScriptCLI::EXIT_OK
   end
 
   # Apply limit if specified
@@ -119,7 +42,6 @@ begin
   stats = {
     total: notes_to_process.size,
     updated: 0,
-    furigana_only: 0,
     errors: 0
   }
 
@@ -139,10 +61,10 @@ begin
       original_sentence_furigana = fields[Kaishi::SENTENCE_FURIGANA_IDX] || ''
 
       # Strip HTML tags
-      cleaned_word = strip_html_tags(original_word)
-      cleaned_furigana = strip_html_tags(original_furigana)
-      cleaned_sentence = strip_html_tags(original_sentence)
-      cleaned_sentence_furigana = strip_html_tags(original_sentence_furigana)
+      cleaned_word = DeckStatus.strip_stray_html(original_word)
+      cleaned_furigana = DeckStatus.strip_stray_html(original_furigana)
+      cleaned_sentence = DeckStatus.strip_stray_html(original_sentence)
+      cleaned_sentence_furigana = DeckStatus.strip_stray_html(original_sentence_furigana)
 
       # Update fields
       fields[Kaishi::WORD_IDX] = cleaned_word
@@ -156,12 +78,6 @@ begin
       changes << "Furigana: #{original_furigana} → #{cleaned_furigana}" if original_furigana != cleaned_furigana
       changes << "Sentence: #{original_sentence} → #{cleaned_sentence}" if original_sentence != cleaned_sentence
       changes << "SentFurigana: #{original_sentence_furigana} → #{cleaned_sentence_furigana}" if original_sentence_furigana != cleaned_sentence_furigana
-
-      if changes.empty?
-        # HTML was furigana tags only — no stripping needed, count silently
-        stats[:furigana_only] += 1
-        next
-      end
 
       change_desc = changes.join('; ')
 
@@ -186,7 +102,6 @@ begin
   puts "=" * 70
   puts "  Total notes:          #{stats[:total]}"
   puts "  Updated:              #{stats[:updated]}" unless options[:dry_run]
-  puts "  Furigana tags only:   #{stats[:furigana_only]}"
   puts "  Errors:               #{stats[:errors]}"
   puts "=" * 70
   puts ""
@@ -199,7 +114,7 @@ begin
   end
 
   # Exit with appropriate code
-  exit(stats[:errors] > 0 ? 1 : 0)
+  exit(stats[:errors] > 0 ? ScriptCLI::EXIT_ERROR : ScriptCLI::EXIT_OK)
 
 ensure
   db.close
