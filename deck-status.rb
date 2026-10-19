@@ -5,10 +5,15 @@
 # workflow: an example sentence, meanings, furigana, pitch accent, audio and so
 # on. Uses the same checks the scripts use to pick their notes (lib/deck_status.rb),
 # so each count is what that script would process now. Read-only.
+#
+# --json also lists the decks holding Takoboto notes (takoboto_decks), the
+# source decks pull-from-takoboto.rb can pull from.
 
 require 'json'
 require_relative 'lib/script_cli'
 require_relative 'lib/deck_status'
+
+TAKOBOTO_NOTE_TYPE = 'jp.takoboto'
 
 cli = ScriptCLI.new(
   'deck-status.rb',
@@ -30,12 +35,13 @@ begin
   by_deck = deck ? { deck => notes } : notes.group_by { |note| note[:deck] }
   decks = by_deck.sort.map do |name, deck_notes|
     counts = DeckStatus.counts(deck_notes)
-    { name: name, total: counts.delete(:total), counts: counts }
+    { name: name, total: counts.delete(:total), needs_work: counts.delete(:needs_work), counts: counts }
   end
 
   if options[:json]
     checks = DeckStatus::CHECKS.map(&:to_h)
-    puts JSON.pretty_generate(checks: checks, decks: decks)
+    takoboto = db.note_counts_by_deck(TAKOBOTO_NOTE_TYPE).sort.map { |name, count| { name: name, count: count } }
+    puts JSON.pretty_generate(checks: checks, decks: decks, takoboto_decks: takoboto)
     exit ScriptCLI::EXIT_OK
   end
 

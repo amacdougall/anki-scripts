@@ -98,6 +98,7 @@ class DeckStatusTest < Minitest::Test
     notes = [complete_note, complete_note(WA => '', SM => ''), complete_note(WA => '')]
     counts = WordLookup.stub(:entry_for, nil) { DeckStatus.counts(notes) }
     assert_equal 3, counts[:total]
+    assert_equal 2, counts[:needs_work]
     assert_equal 2, counts[:word_audio]
     assert_equal 1, counts[:sentence_meaning]
     assert_equal 0, counts[:sentence]

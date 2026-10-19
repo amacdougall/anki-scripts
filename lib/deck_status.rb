@@ -64,10 +64,17 @@ module DeckStatus
     public_send("needs_#{key}?", note)
   end
 
-  # { total: N, stray_html: n, sentence: n, ... } for a list of notes.
+  # { total: N, needs_work: N, stray_html: n, sentence: n, ... } for a list of
+  # notes. needs_work counts the notes that fail at least one check.
   def counts(notes)
-    CHECKS.to_h { |check| [check.key, notes.count { |note| needs?(check.key, note) }] }
-          .merge(total: notes.size)
+    counts = CHECKS.to_h { |check| [check.key, 0] }
+    needs_work = 0
+    notes.each do |note|
+      failed = CHECKS.select { |check| needs?(check.key, note) }
+      failed.each { |check| counts[check.key] += 1 }
+      needs_work += 1 unless failed.empty?
+    end
+    counts.merge(total: notes.size, needs_work: needs_work)
   end
 
   # --- The checks ---

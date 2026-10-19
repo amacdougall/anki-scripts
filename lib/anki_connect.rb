@@ -76,6 +76,12 @@ class AnkiConnect
     invoke('sync')
   end
 
+  # Ask Anki to close (gracefully: it closes the collection, and syncs if set
+  # to sync on close). Returns before Anki has finished closing.
+  def gui_exit
+    invoke('guiExitAnki')
+  end
+
   # No transactions over AnkiConnect. This yields so existing
   # `db.transaction do ... end` blocks keep working, but it is NOT atomic:
   # a failure partway through leaves earlier writes committed. Batch creates
@@ -173,6 +179,12 @@ class AnkiConnect
     tags_by_note = tags_for(by_note.keys)
     by_note.each { |note_id, note| note[:tags] = tags_by_note[note_id] }
     by_note.values.sort_by { |n| n[:id] }
+  end
+
+  # { deck name => note count } for the notes of a note type, by the deck of
+  # each note's first card (e.g. which decks hold jp.takoboto notes).
+  def note_counts_by_deck(note_type)
+    cards_info(deck_query(note_type, nil, nil)).uniq { |card| card[:note_id] }.map { |card| card[:deck] }.tally
   end
 
   # --- Cards (scheduling) ---------------------------------------------------
