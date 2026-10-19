@@ -136,6 +136,10 @@ It's only a front end: every change to a card is made by a script, the counts
 come from `./deck-status.rb`, and anything you can do on the page you can do
 from a terminal with the command it shows. A few details:
 
+- The terminal you started it from logs what it's doing: each
+  `deck-status.rb` count with its timing (and a line every 5 s while one is
+  slow, e.g. while Anki syncs), runs starting and finishing, and AnkiConnect
+  coming and going. `--verbose` adds a line per request.
 - It listens on `127.0.0.1` only, and runs one script at a time. Cancel sends
   Ctrl-C, which is safe: the scripts pick up where they stopped.
 - **Example sentences** pauses after generating, so you can read or edit

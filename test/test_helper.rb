@@ -11,3 +11,7 @@ module TestHelpers
     { id: 1, fields: array, tags: tags }
   end
 end
+
+# The Workbench logs what it's doing to the terminal; tests keep it quiet.
+require_relative '../workbench/log'
+Workbench::Log.io = nil

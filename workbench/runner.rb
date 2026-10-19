@@ -5,6 +5,7 @@ require 'json'
 require 'open3'
 require 'securerandom'
 require 'time'
+require_relative 'log'
 
 module Workbench
   # Runs a step's scripts, one run at a time, in a background thread. Each
@@ -163,10 +164,13 @@ module Workbench
     def execute(run, on_finish)
       status = 'succeeded'
       code = 0
+      start = Log.now
+      Log.info("Run #{run.id} started: #{run.step_id}#{" on #{run.deck}" if run.deck}#{' (dry run)' if run.dry_run}")
       run.invocations.each_with_index do |invocation, i|
         break if run.cancelled?
 
         run.add_line("$ #{run.commands[i]}", 'cmd')
+        Log.info("Run #{run.id}: $ #{run.commands[i]}")
         code = spawn(run, invocation.argv)
         status = run.cancelled? ? 'cancelled' : STATUSES.fetch(code, 'failed')
         break unless status == 'succeeded'
@@ -177,12 +181,13 @@ module Workbench
       code = nil
     ensure
       run.finish(status, code)
+      Log.info("Run #{run.id} #{status}#{" (exit #{code})" if code} in #{Log.elapsed(start)}")
       log(run)
       @mutex.synchronize { @active = nil }
       begin
         on_finish&.call(run)
       rescue StandardError => e
-        warn "Workbench: after-run hook failed: #{e.message}"
+        Log.info("Run #{run.id}: after-run refresh failed: #{e.message}")
       end
     end
 
@@ -214,7 +219,7 @@ module Workbench
         f.puts
       end
     rescue SystemCallError => e
-      warn "Workbench: couldn't write #{@log_path}: #{e.message}"
+      Log.info("Couldn't write #{@log_path}: #{e.message}")
     end
   end
 end

@@ -92,6 +92,21 @@ class AppTest < Minitest::Test
     assert_equal({ 'anki' => true }, body)
   end
 
+  def test_logs_when_anki_comes_and_goes
+    log = StringIO.new
+    Workbench::Log.io = log
+    app.set :anki_was_up, nil
+    get '/api/status'
+    get '/api/status'
+    app.set :anki_up, -> { raise AnkiConnect::NotRunningError, 'Cannot reach AnkiConnect' }
+    get '/api/status'
+    assert_equal({ 'anki' => false }, body)
+    lines = log.string.lines.map { |l| l.sub(/\A\[[\d:]+\] /, '').chomp }
+    assert_equal ['AnkiConnect is answering', "AnkiConnect isn't answering: Cannot reach AnkiConnect"], lines
+  ensure
+    Workbench::Log.io = nil
+  end
+
   def test_decks_include_summaries
     get '/api/decks'
     assert last_response.ok?

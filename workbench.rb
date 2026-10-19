@@ -12,7 +12,7 @@ $stdout.sync = true
 require 'optparse'
 require 'rbconfig'
 
-options = { port: 4567, open: true }
+options = { port: 4567, open: true, verbose: false }
 OptionParser.new do |opts|
   opts.banner = 'Usage: workbench.rb [options]'
   opts.separator ''
@@ -21,6 +21,7 @@ OptionParser.new do |opts|
   opts.separator 'Options:'
   opts.on('--port PORT', Integer, "Port to listen on (default: #{options[:port]})") { |p| options[:port] = p }
   opts.on('--[no-]open', 'Open the page in a browser (default: on)') { |o| options[:open] = o }
+  opts.on('-v', '--verbose', 'Also log every request') { options[:verbose] = true }
   opts.on('-h', '--help', '-?', 'Show this message') do
     puts opts
     exit 0
@@ -38,10 +39,12 @@ end
 
 require_relative 'workbench/app'
 
+Workbench::Log.verbose = options[:verbose]
+
 url = "http://localhost:#{options[:port]}/"
 
 Workbench::App.on_start do
-  puts "Workbench running at #{url} (Ctrl-C to stop)"
+  Workbench::Log.info("Workbench running at #{url} (Ruby #{RUBY_VERSION}; Ctrl-C to stop)")
   next unless options[:open]
 
   opener = case RbConfig::CONFIG['host_os']

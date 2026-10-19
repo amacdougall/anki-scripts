@@ -7,6 +7,7 @@ require 'yaml'
 require_relative 'backup'
 require_relative 'command'
 require_relative 'decks'
+require_relative 'log'
 require_relative 'preferences'
 require_relative 'runner'
 require_relative 'steps'
@@ -33,6 +34,16 @@ module Workbench
     # stops offering to write the same sentences again.
     set :sentences_written, {}
     set :anki_up, -> { AnkiConnect.new.version && true }
+    set :anki_was_up, nil
+
+    before do
+      @request_started = Log.now
+    end
+
+    # --verbose: one line per request (an event stream logs when it opens).
+    after do
+      Log.debug("#{request.request_method} #{request.path} → #{response.status} (#{Log.elapsed(@request_started)})")
+    end
 
     helpers do
       def json(data, status = 200)
@@ -53,10 +64,19 @@ module Workbench
         settings.decks
       end
 
+      # Logs when AnkiConnect comes or goes (the page checks every 15 s).
       def anki_up?
-        settings.anki_up
-      rescue AnkiConnect::Error, SystemCallError
-        false
+        up = begin
+          settings.anki_up
+        rescue AnkiConnect::Error, SystemCallError => e
+          error = e.message
+          false
+        end
+        if up != settings.anki_was_up
+          Log.info(up ? 'AnkiConnect is answering' : "AnkiConnect isn't answering#{": #{error}" if error}")
+          settings.anki_was_up = up
+        end
+        up
       end
 
       def context
@@ -84,12 +104,22 @@ module Workbench
       json({ error: env['sinatra.error'].message }, 409)
     end
 
+    # Usually a preview of a half-filled form, so only with --verbose.
     error Command::Invalid do
+      Log.debug("#{request.request_method} #{request.path}: #{env['sinatra.error'].message}")
       json({ error: env['sinatra.error'].message }, 422)
     end
 
     error Decks::Error, AnkiConnect::Error do
+      Log.info("#{request.request_method} #{request.path} failed: #{env['sinatra.error'].message.strip}")
       json({ error: env['sinatra.error'].message }, 503)
+    end
+
+    error do
+      error = env['sinatra.error']
+      Log.info("#{request.request_method} #{request.path} crashed: #{error.class}: #{error.message}")
+      error.backtrace&.first(5)&.each { |line| Log.info("    #{line}") }
+      json({ error: "#{error.class}: #{error.message}" }, 500)
     end
 
     get '/' do
