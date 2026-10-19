@@ -24,6 +24,10 @@ require_relative 'progress_reporter'
 # script passes deck: :optional (add-cards.rb, whose YAML file may name it
 # instead), and the curated 'Kaishi 1.5k' deck is always refused as a target.
 class ScriptCLI
+  # Write output as it happens, even into a pipe, so a tool running a script
+  # (the planned Workbench, or `| tee`) sees progress line by line.
+  $stdout.sync = true
+
   # Exit statuses, the same for every script.
   EXIT_OK = 0
   EXIT_ERROR = 1 # something failed: a card, a lookup, Anki
