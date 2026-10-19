@@ -9,11 +9,13 @@ GEM
       net-http (~> 0.5)
     json (3.1.0)
     logger (1.7.0)
+    minitest (5.16.3)
     net-http (0.10.0)
       net-protocol (>= 0.3.0)
       uri (>= 0.11.1)
     net-protocol (0.4.0)
       timeout
+    rake (13.0.6)
     timeout (0.6.1)
     uri (1.1.2)
 
@@ -27,6 +29,8 @@ PLATFORMS
 
 DEPENDENCIES
   faraday (>= 2.0, < 3)
+  minitest (~> 5.16)
+  rake (~> 13.0)
 
 RUBY VERSION
    ruby 3.2.2p53

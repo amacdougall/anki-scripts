@@ -113,6 +113,16 @@ module WordLookup
     JMDict.misc_tags(entry).include?('uk')
   end
 
+  # The JMdict entry best matching a word (plain text, no <ruby>) and, when
+  # given, its reading; nil when the word isn't in the dictionary.
+  def self.entry_for(word, reading = '')
+    entries = JMDict.entries_for(word)
+    return nil if entries.empty?
+
+    by_reading = blank?(reading) ? nil : entries.find { |e| entry_has_reading?(e, reading) }
+    by_reading || entries.first
+  end
+
   # Check whether a JMdict entry includes the given reading.
   def self.entry_has_reading?(entry, reading)
     JMDict.readings(entry).include?(reading)

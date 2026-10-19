@@ -1,0 +1,44 @@
+# LLM providers, the models each one offers, and the default model per task.
+#
+# Scripts take --provider and --model; without --model they use the task's
+# default for the chosen provider. Model names aren't restricted to the lists
+# below (any name the provider's CLI accepts works); the lists are what the
+# scripts' help and other tools offer as choices.
+#
+# Claude is the default provider. OpenCode is pay-per-use, for large batches
+# that would eat into a Claude plan's session usage. OpenCode can drop a model
+# from its servers while `opencode models` still lists it (deepseek-v4-flash
+# started returning 404 in October 2026), so check that first if every request
+# fails.
+
+default_provider: claude
+
+providers:
+  claude:
+    models: [haiku, sonnet, opus]
+  opencode:
+    models:
+      - opencode/deepseek-v4.1-flash
+      - opencode/kimi-k2.6
+
+tasks:
+  # A meaning for a word JMdict doesn't know (add-cards.rb, add-meanings.rb).
+  # Short words: a small, fast model is plenty.
+  word_meaning:
+    claude: haiku
+    opencode: opencode/deepseek-v4.1-flash
+
+  # Translating example sentences (add-sentence-meanings.rb).
+  sentence_translation:
+    claude: sonnet
+    opencode: opencode/deepseek-v4.1-flash
+
+  # Checking sentence furigana in context (generate-furigana.rb).
+  furigana_review:
+    claude: sonnet
+    opencode: opencode/deepseek-v4.1-flash
+
+  # Writing example sentences (generate-sentences.rb).
+  sentence_generation:
+    claude: sonnet
+    opencode: opencode/deepseek-v4.1-flash
