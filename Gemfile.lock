@@ -2,6 +2,7 @@ GEM
   remote: https://rubygems.org/
   specs:
     base64 (0.3.0)
+    csv (3.3.6)
     faraday (2.15.0)
       faraday-net_http (>= 2.0, < 3.6)
       json
@@ -33,6 +34,7 @@ GEM
     rackup (2.3.1)
       rack (>= 3)
     rake (13.4.2)
+    rexml (3.4.4)
     sinatra (4.2.1)
       logger (>= 1.6.0)
       mustermann (~> 3.0)
@@ -53,12 +55,15 @@ PLATFORMS
   x86_64-linux
 
 DEPENDENCIES
+  base64
+  csv
   faraday (>= 2.0, < 3)
   minitest (~> 5.25)
   puma (~> 7.0)
   rack-test (~> 2.2)
   rackup (~> 2.2)
   rake (~> 13.0)
+  rexml
   sinatra (~> 4.1)
 
 RUBY VERSION

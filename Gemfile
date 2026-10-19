@@ -4,6 +4,11 @@ ruby '>= 3.4'
 # Used by the inlined Gemini TTS client (lib/gemini_tts/).
 gem 'faraday', '>= 2.0', '< 3'
 
+# Standard-library gems that Ruby 3.4 no longer loads by default under Bundler.
+gem 'base64' # lib/gemini_tts/
+gem 'csv' # lib/pitch_database.rb
+gem 'rexml' # scripts/build_kanjidic2_json.rb
+
 # The Workbench (workbench.rb), a local web UI for the scripts.
 group :workbench do
   gem 'puma', '~> 7.0'
