@@ -76,12 +76,6 @@ class AnkiConnect
     invoke('sync')
   end
 
-  # Ask Anki to close (gracefully: it closes the collection, and syncs if set
-  # to sync on close). Returns before Anki has finished closing.
-  def gui_exit
-    invoke('guiExitAnki')
-  end
-
   # No transactions over AnkiConnect. This yields so existing
   # `db.transaction do ... end` blocks keep working, but it is NOT atomic:
   # a failure partway through leaves earlier writes committed. Batch creates

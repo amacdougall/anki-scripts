@@ -53,6 +53,12 @@ module Workbench
         settings.decks
       end
 
+      def anki_up?
+        settings.anki_up
+      rescue AnkiConnect::Error, SystemCallError
+        false
+      end
+
       def context
         all = decks.all
         Command::Context.new(decks: all['deck_names'], takoboto_decks: all['takoboto_decks'].map { |d| d['name'] })
@@ -91,12 +97,7 @@ module Workbench
     end
 
     get '/api/status' do
-      anki = begin
-        settings.anki_up
-      rescue AnkiConnect::Error, SystemCallError
-        false
-      end
-      json(anki: anki)
+      json(anki: anki_up?)
     end
 
     # Every deck's counts, plus the page's summary of each (summary.rb);
@@ -171,9 +172,9 @@ module Workbench
       json(Backup.info)
     end
 
-    # macOS only: closes Anki, backs up and reopens it, as a run.
+    # Runs backup-collection.sh, as a run, once Anki is closed.
     post '/api/backup' do
-      halt 422, JSON.generate(error: Backup::INSTRUCTIONS) unless Backup.automated?
+      json({ error: Backup::CLOSE_FIRST }, 409) if anki_up?
 
       json(settings.runner.start(Backup.plan).to_h, 201)
     end

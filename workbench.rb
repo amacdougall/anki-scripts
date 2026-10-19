@@ -58,4 +58,9 @@ end
 Workbench::App.set :environment, :production
 Workbench::App.set :server, :puma
 Workbench::App.set :server_settings, { Threads: '1:16', Silent: true }
-Workbench::App.run!(bind: '127.0.0.1', port: options[:port], quiet: true)
+begin
+  Workbench::App.run!(bind: '127.0.0.1', port: options[:port], quiet: true)
+rescue Errno::EADDRINUSE
+  warn "Error: port #{options[:port]} is in use (is the Workbench already running?). Try --port."
+  exit 1
+end

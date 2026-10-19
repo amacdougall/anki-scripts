@@ -38,8 +38,8 @@ module Workbench
     Invocation = Struct.new(:script_id, :argv, keyword_init: true) do
       # The command as a person would type it: ./script.rb --flag value ...
       def display
-        script = "./#{File.basename(argv[1])}"
-        [script, *argv[2..]].map { |arg| Command.quote(arg) }.join(' ')
+        script, *args = argv.first == RbConfig.ruby ? argv[1..] : argv
+        ["./#{File.basename(script)}", *args].map { |arg| Command.quote(arg) }.join(' ')
       end
     end
 

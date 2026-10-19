@@ -179,6 +179,15 @@ def check!
     end
   end
 
+  step('Workbench (optional web page for the scripts)') do
+    gems = 'require "sinatra/base"; require "puma"; require "rackup"'
+    if system('bundle', 'exec', 'ruby', '-e', gems, chdir: ROOT, out: File::NULL, err: File::NULL)
+      ok 'sinatra, puma and rackup installed: ./workbench.rb starts it'
+    else
+      warn_line 'gems not installed; run `bundle install` to use ./workbench.rb'
+    end
+  end
+
   step('Whisper (optional audio reading check)') do
     if system(File.join(ROOT, 'bin', 'transcribe'), '--check')
       ok 'whisper-cli and model found'

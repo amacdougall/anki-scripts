@@ -17,6 +17,7 @@ const state = {
   lastRequest: null, // the last POST /api/runs body, for "Run again"
   sentences: null, // /api/sentences
   backup: null, // /api/backup
+  backupMessage: null, // "close Anki first" or "reopen Anki", until Anki is back
   anki: null
 };
 
@@ -149,7 +150,7 @@ function renderBackup() {
   const text = $('backup-text');
   text.textContent = `Last backup: ${state.backup ? backupText() : '…'}`;
   text.className = state.backup && backupStale() ? 'stale' : '';
-  $('backup-button').disabled = running() || !state.backup;
+  $('backup-button').disabled = running();
 }
 
 // --- Step list ---
@@ -305,8 +306,10 @@ function renderStep() {
 
   parts.push(`<div class="command"><div class="section-label">Command</div><div class="command-box" id="command"></div></div>`);
 
-  if (s.bulk && state.backup && backupStale()) {
-    parts.push(`<div class="note warn" role="note"><span>This step can change many cards, and the last backup was ${h(backupText())}.${state.backup.automated ? ' Backing up quits Anki briefly.' : ''}</span><button type="button" class="btn" data-action="backup"${running() ? ' disabled' : ''}>Back up now</button></div>`);
+  if (state.backupMessage) {
+    parts.push(`<div class="note warn" role="note"><span>${h(state.backupMessage)}</span><button type="button" class="btn" data-action="backup"${running() ? ' disabled' : ''}>Back up</button></div>`);
+  } else if (s.bulk && state.backup && backupStale()) {
+    parts.push(`<div class="note warn" role="note"><span>This step can change many cards, and the last backup was ${h(backupText())}. Backing up needs Anki closed for a moment.</span><button type="button" class="btn" data-action="backup"${running() ? ' disabled' : ''}>Back up now</button></div>`);
   }
 
   parts.push(resultNote());
@@ -500,6 +503,7 @@ async function finished(run) {
   state.result = run;
   renderRunState();
   if (run.step === 'backup') {
+    state.backupMessage = run.status === 'succeeded' ? 'Backed up. Reopen Anki to carry on.' : null;
     await Promise.all([loadBackup(), loadStatus()]);
   } else if (!run.dry_run) {
     await refreshDeck(run.step === 'takoboto' ? null : run.deck);
@@ -528,12 +532,17 @@ async function refreshDeck(name) {
 // --- Loading ---
 
 async function loadStatus() {
+  const was = state.anki;
   try {
     state.anki = (await api('/api/status')).anki;
   } catch (e) {
     state.anki = false;
   }
   renderAnki();
+  if (state.anki && !was && state.backupMessage && state.config) {
+    state.backupMessage = null;
+    renderStep();
+  }
 }
 
 async function loadDecks(refresh = false) {
@@ -667,15 +676,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // --- Backups ---
 
+// backup-collection.sh needs Anki closed; closing and reopening it is up to
+// the person, so the server refuses (409) while AnkiConnect still answers.
 async function startBackup() {
-  if (!state.backup) return;
-  if (!state.backup.automated) {
-    appendLog({ text: state.backup.instructions, kind: 'warn' });
-    return;
-  }
   try {
     follow(await api('/api/backup', { method: 'POST' }));
   } catch (e) {
-    appendLog({ text: `Couldn’t start the backup: ${e.message}`, kind: 'err' });
+    state.backupMessage = e.message;
+    renderStep();
+    loadStatus();
   }
 }

@@ -179,6 +179,17 @@ class AppTest < Minitest::Test
   def test_backup_info
     get '/api/backup'
     assert_includes body.keys, 'last'
-    assert_includes [true, false], body['automated']
+  end
+
+  def test_backup_needs_anki_closed
+    post '/api/backup'
+    assert_equal 409, last_response.status
+    assert_match(/Close Anki first/, body['error'])
+    assert_empty @runner.plans
+
+    app.set :anki_up, -> { false }
+    post '/api/backup'
+    assert_equal 201, last_response.status
+    assert_equal ['./backup-collection.sh'], @runner.plans.last.displays
   end
 end

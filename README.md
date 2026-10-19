@@ -116,6 +116,36 @@ data lives somewhere else.
 **Close the Browse window.** AnkiConnect can't update a note that's open in
 Anki's card browser.
 
+## The Workbench
+
+The Workbench is a local web page that runs these same scripts, so you can
+click through the workflow instead of typing commands:
+
+```sh
+./workbench.rb             # opens http://localhost:4567/ (--port to change it)
+```
+
+Pick a deck at the top. The left column lists the steps in the suggested order,
+each with how many cards in that deck still need it; the right column shows
+every deck's progress and some advice. Choose a step, set its options, and
+press Run (or Dry run). The page shows the exact command it will run, then the
+script's output as it happens. Any step can run at any time; when one runs
+ahead of a step it depends on, the page says which cards it will skip.
+
+It's only a front end: every change to a card is made by a script, the counts
+come from `./deck-status.rb`, and anything you can do on the page you can do
+from a terminal with the command it shows. A few details:
+
+- It listens on `127.0.0.1` only, and runs one script at a time. Cancel sends
+  Ctrl-C, which is safe: the scripts pick up where they stopped.
+- **Example sentences** pauses after generating, so you can read or edit
+  `temp/example-sentences.yaml` before pressing "Write N sentences to Anki".
+- **Back up** runs `./backup-collection.sh`. Quit Anki first (the page will
+  remind you), and reopen it afterward.
+- It remembers each deck's provider, model and sentence prompt in
+  `config/workbench.local.yaml` (not committed), and logs every run to
+  `temp/workbench.log`.
+
 ## 1. Getting words in
 
 ### Mined cards
