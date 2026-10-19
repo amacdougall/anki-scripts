@@ -35,10 +35,13 @@ class GenerateSentences
     generator = SentenceGenerator.new(instructions, llm: llm)
 
     # Automatically resume from any existing output unless --overwrite given.
-    # Only notes that previously succeeded are carried over; not-yet-seen and
-    # previously-errored notes are (re)processed.
+    # Only notes that previously succeeded, and are still in the input, are
+    # carried over; not-yet-seen and previously-errored notes are (re)processed.
+    # (Notes from another deck's run, or already written to Anki and so no
+    # longer extracted, are dropped.)
     existing_notes = @options[:overwrite] ? [] : load_existing_output
-    completed_notes = existing_notes.select { |n| n['generation_status'] == 'success' }
+    input_ids = Set.new(input_data['notes'].map { |n| n['note_id'] })
+    completed_notes = existing_notes.select { |n| n['generation_status'] == 'success' && input_ids.include?(n['note_id']) }
     processed_note_ids = Set.new(completed_notes.map { |n| n['note_id'] })
 
     # Initialize output writer
