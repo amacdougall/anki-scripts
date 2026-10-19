@@ -25,12 +25,17 @@ require 'uri'
 class AnkiConnect
   DEFAULT_ENDPOINT = 'http://127.0.0.1:8765'
   API_VERSION = 6
+  API_KEY_ENV = 'ANKICONNECT_API_KEY'
 
   class Error < StandardError; end
   class NotRunningError < Error; end
 
-  def initialize(endpoint = DEFAULT_ENDPOINT)
+  # The API key comes from $ANKICONNECT_API_KEY by default, matching the
+  # "apiKey" set in AnkiConnect's add-on config. It's sent as "key" on every
+  # request; with no key set, requests go out without one.
+  def initialize(endpoint = DEFAULT_ENDPOINT, api_key: ENV.fetch(API_KEY_ENV, nil))
     @uri = URI(endpoint)
+    @api_key = api_key unless api_key.to_s.empty?
     @field_names = {} # model name => ordered [field names]
   end
 
@@ -57,10 +62,11 @@ class AnkiConnect
   end
 
   # Replaces the old AnkiDatabase.exit_if_anki_running! guard, but inverted:
-  # every script now REQUIRES Anki to be running.
+  # every script now REQUIRES Anki to be running. Also exits on a rejected API
+  # key, since `version` needs one too.
   def self.require_running!(endpoint = DEFAULT_ENDPOINT)
     new(endpoint).version
-  rescue NotRunningError => e
+  rescue Error => e
     warn "Error: #{e.message}"
     exit 1
   end
@@ -332,6 +338,15 @@ class AnkiConnect
     pairs.to_h
   end
 
+  # AnkiConnect rejects a missing or wrong key with "valid api key must be
+  # provided"; point at the env var so the fix is obvious.
+  def error_with_hint(error)
+    return error unless error.to_s.include?('api key')
+
+    hint = @api_key ? "check that $#{API_KEY_ENV} matches" : "set $#{API_KEY_ENV} to"
+    "#{error} (#{hint} the apiKey in AnkiConnect's add-on config)"
+  end
+
   # Build an Anki browser search query scoping a note type to / away from decks.
   def deck_query(note_type, deck, exclude_deck)
     query = +%(note:#{quote(note_type)})
@@ -347,6 +362,7 @@ class AnkiConnect
 
   def invoke(action, params = {})
     body = { action: action, version: API_VERSION }
+    body[:key] = @api_key if @api_key
     body[:params] = params unless params.empty?
 
     request = Net::HTTP::Post.new(@uri)
@@ -358,7 +374,7 @@ class AnkiConnect
     end
 
     payload = JSON.parse(response.body)
-    raise Error, payload['error'] if payload['error']
+    raise Error, error_with_hint(payload['error']) if payload['error']
 
     payload['result']
   end

@@ -8,6 +8,9 @@ is running. Anki itself performs every read and write.
 
 - **Add-on:** [AnkiConnect](https://git.sr.ht/~foosoft/anki-connect), listening
   on `http://127.0.0.1:8765`.
+- **API key (optional):** if `apiKey` is set in the add-on config, export the
+  same value as `$ANKICONNECT_API_KEY`; it's sent as `key` on every request.
+  Pass `AnkiConnect.new(api_key: ...)` to override.
 - **Primary note type:** Kaishi 1.5k (14 fields).
 - **Requirement:** Anki must be **running** with the
   AnkiConnect add-on installed. Scripts call `AnkiConnect.require_running!`,

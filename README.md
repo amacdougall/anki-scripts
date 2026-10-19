@@ -22,6 +22,8 @@ read a `--help` or hand a script to Claude Code and ask what it does.
   [**AnkiConnect**](https://ankiweb.net/shared/info/2055492159) add-on.
   Every script talks to Anki through AnkiConnect, so **Anki must be running**
   whenever you run a script.
+  If you set an `apiKey` in AnkiConnect's config, export the same value as
+  `ANKICONNECT_API_KEY`.
 - **The [Kaishi 1.5k](https://ankiweb.net/shared/info/1196762551) deck**,
   installed in Anki. The scripts create and fill cards of its `Kaishi 1.5k`
   note type, and expect its 14 fields as they ship. (You don't have to study

@@ -135,6 +135,10 @@ def check!
       bad 'AnkiConnect not reachable: start Anki, and install the AnkiConnect add-on (code 2055492159)'
       @problems += 1
       next
+    rescue AnkiConnect::Error => e
+      bad e.message
+      @problems += 1
+      next
     end
     ok 'AnkiConnect is running'
 
