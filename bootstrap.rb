@@ -65,7 +65,7 @@ end
 
 def setup!
   step('Ruby gems') do
-    raise "Ruby 3.2 or newer is required (this is #{RUBY_VERSION})" if Gem::Version.new(RUBY_VERSION) < Gem::Version.new('3.2')
+    raise "Ruby 3.4 or newer is required (this is #{RUBY_VERSION})" if Gem::Version.new(RUBY_VERSION) < Gem::Version.new('3.4')
 
     system('bundle', 'install', '--quiet', chdir: ROOT) or raise 'bundle install failed'
     ok 'bundle install'

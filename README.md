@@ -17,7 +17,7 @@ read a `--help` or hand a script to Claude Code and ask what it does.
 
 ## Requirements
 
-- **Ruby 3.2+** with Bundler.
+- **Ruby 3.4+** with Bundler.
 - **Anki** (desktop) with the
   [**AnkiConnect**](https://ankiweb.net/shared/info/2055492159) add-on.
   Every script talks to Anki through AnkiConnect, so **Anki must be running**
