@@ -35,8 +35,10 @@ module DeckStatus
     'sent' => 'audio::pending::sentence'
   }.freeze
 
-  # HTML other than the <ruby>/<rt>/<rp> tags furigana uses.
-  STRAY_HTML = %r{<(?!/?(?:ruby|rt|rp)\b)[^>]+>}
+  # HTML other than the <ruby>/<rt>/<rp> tags furigana uses and the line
+  # breaks (<br>, <br/>, <br />) Anki's editor inserts, which lyrics and
+  # conversations need.
+  STRAY_HTML = %r{<(?!/?(?:ruby|rt|rp|br)\b)[^>]+>}i
   STRAY_HTML_FIELDS = [Kaishi::WORD_IDX, Kaishi::WORD_FURIGANA_IDX,
                        Kaishi::SENTENCE_IDX, Kaishi::SENTENCE_FURIGANA_IDX].freeze
 

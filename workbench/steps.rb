@@ -109,7 +109,7 @@ module Workbench
       Step.new(
         id: 'strip_html', label: 'Strip HTML', group: :fill, checks: %w[stray_html], dry_run: true,
         description: 'Removes stray HTML that reader tools leave in the Word, Word Furigana, Sentence and ' \
-                     'Sentence Furigana fields. Furigana <ruby> tags stay.',
+                     'Sentence Furigana fields. Furigana <ruby> tags and <br> line breaks stay.',
         scripts: single('strip', 'strip-word-html.rb'),
         options: [limit]
       ),

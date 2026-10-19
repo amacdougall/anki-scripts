@@ -43,7 +43,15 @@ class DeckStatusTest < Minitest::Test
     refute needs?(:stray_html, complete_note(W => '<ruby>食<rt>た</rt></ruby>べる'))
     assert needs?(:stray_html, complete_note(S => '<b>学校</b>に行く。'))
     assert_equal '学校に<ruby>行<rt>い</rt></ruby>く。',
-                 DeckStatus.strip_stray_html('<b>学校</b>に<br><ruby>行<rt>い</rt></ruby>く。')
+                 DeckStatus.strip_stray_html('<b>学校</b>に<span><ruby>行<rt>い</rt></ruby></span>く。')
+  end
+
+  def test_stray_html_keeps_line_breaks
+    %w[<br> <br/> <BR>].push('<br />').each do |br|
+      refute needs?(:stray_html, complete_note(S => "学校に行く。#{br}友達と。")), br
+    end
+    assert_equal '一行目<br>二行目<br />三行目', DeckStatus.strip_stray_html('<div>一行目<br>二行目<br />三行目</div>')
+    assert needs?(:stray_html, complete_note(S => '<bring>')), 'only the br tag itself'
   end
 
   def test_meanings_need_their_source_text

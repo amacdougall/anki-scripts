@@ -5,8 +5,9 @@ require_relative 'lib/deck_status'
 
 cli = ScriptCLI.new(
   'strip-word-html.rb',
-  'Strips stray HTML (anything but <ruby> furigana) from the Word, Word Furigana,',
-  'Sentence and Sentence Furigana fields. Reader tools tend to leave it behind.'
+  'Strips stray HTML from the Word, Word Furigana, Sentence and Sentence Furigana',
+  'fields. Reader tools tend to leave it behind. <ruby> furigana and <br> line',
+  'breaks are kept.'
 )
 cli.dry_run
 cli.limit('Process only the first N notes with HTML')
