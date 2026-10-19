@@ -77,6 +77,14 @@ class SummaryTest < Minitest::Test
     assert_equal({ 'review_unreviewed' => true }, item[:preset])
   end
 
+  def test_step_note_for_unreviewed_furigana
+    note = summary(furigana_review: 3)[:step_notes]['furigana']
+    assert_match(/\A3 sentences have furigana that hasn’t been reviewed/, note[:text])
+    assert_equal({ 'review_unreviewed' => true }, note[:preset])
+    assert_nil summary(furigana: 1, furigana_review: 3)[:step_notes]['furigana'], 'generating comes first'
+    assert_empty summary[:step_notes]
+  end
+
   def test_empty_deck
     s = Summary.for(nil, takoboto_decks: [{ 'name' => 'Takoboto A', 'count' => 3 }])
     assert_nil s[:suggested]

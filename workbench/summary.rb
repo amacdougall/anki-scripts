@@ -21,6 +21,7 @@ module Workbench
         badges: Steps::ALL.to_h { |step| [step.id, badge(step, counts, waiting)] },
         suggested: suggested(counts),
         dep_notes: Steps::ALL.select(&:deps).to_h { |step| [step.id, dep_note(step, counts)] }.compact,
+        step_notes: step_notes(counts),
         advice: advice(deck, waiting, translation_notes)
       }
     end
@@ -65,6 +66,21 @@ module Workbench
         "#{dep.label}: #{n} #{n == 1 ? 'card still needs' : 'cards still need'} it. " \
           "Run #{step.label} again after #{dep.label} to pick #{n == 1 ? 'it' : 'them'} up."
       end.join(' ')
+    end
+
+    # Explanations shown on a step itself, each with an optional preset the
+    # page offers as a button ({ text:, action:, preset: }).
+    def step_notes(counts)
+      notes = {}
+      review = counts.fetch('furigana_review', 0)
+      if review.positive? && counts.fetch('furigana', 0).zero?
+        notes['furigana'] = item("#{plural(review, 'sentence')} #{verb(review, 'has', 'have')} furigana that " \
+                                 'hasn’t been reviewed (written before reviews, or by a run that stopped early). ' \
+                                 'A normal run only reviews the furigana it writes; review these with ' \
+                                 '“Only review furigana not yet reviewed”.',
+                                 'todo', 'furigana', 'Set up the review', preset: { 'review_unreviewed' => true })
+      end
+      notes
     end
 
     def advice(deck, waiting, translation_notes)

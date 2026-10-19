@@ -287,6 +287,11 @@ function renderStep() {
 
   const dep = sum && sum.dep_notes[s.id];
   if (dep) parts.push(`<div class="note dep" role="note"><strong>Out of the suggested order</strong>${h(dep)}</div>`);
+  const stepNote = sum && sum.step_notes[s.id];
+  if (stepNote) {
+    const preset = stepNote.preset && Object.entries(stepNote.preset).some(([k, v]) => values(s)[k] !== v);
+    parts.push(`<div class="note warn" role="note"><span>${h(stepNote.text)}</span>${preset ? `<button type="button" class="btn" data-action="preset">${h(stepNote.action)}</button>` : ''}</div>`);
+  }
 
   if (s.info) {
     parts.push(miningTable());
@@ -667,6 +672,13 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'again': if (state.lastRequest) api('/api/runs', { body: state.lastRequest }).then(follow).catch((err) => appendLog({ text: err.message, kind: 'err' })); break;
       case 'cancel': if (state.run) api(`/runs/${state.run.id}/cancel`, { method: 'POST' }); break;
       case 'backup': startBackup(); break;
+      case 'preset': {
+        const note = summary().step_notes[state.stepId];
+        Object.assign(values(), note.preset);
+        renderStep();
+        schedulePreview();
+        break;
+      }
       default:
     }
   });
