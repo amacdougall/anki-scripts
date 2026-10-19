@@ -9,6 +9,9 @@ backups/
 # Your per-deck name readings (start from config/deck-readings.example.yaml)
 config/deck-readings.yaml
 
+# The Workbench's remembered per-deck options
+config/workbench.local.yaml
+
 # Your own prompts: per-deck translation notes (とらドラ！.md is the committed
 # example) and deck-specific example-sentence prompts
 prompts/translation/*

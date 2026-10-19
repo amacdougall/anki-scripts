@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kaishi Workbench</title>
+<link rel="stylesheet" href="/workbench.css">
+<script src="/workbench.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <span class="brand-name">Kaishi Workbench</span>
+      <span class="mono dim">anki-scripts</span>
+    </div>
+    <div class="deck-picker">
+      <label for="deck-select">Target deck</label>
+      <select id="deck-select"><option>Loading…</option></select>
+    </div>
+    <div class="anki-status" id="anki-status">
+      <span class="dot" aria-hidden="true"></span><span class="text">Checking AnkiConnect…</span>
+    </div>
+    <div class="backup-status">
+      <span id="backup-text">Last backup: …</span>
+      <button type="button" class="btn" id="backup-button">Back up</button>
+    </div>
+  </div>
+</header>
+
+<main class="layout">
+  <nav aria-label="Steps" class="steps" id="steps"></nav>
+
+  <section aria-label="Selected step" class="centre">
+    <div class="card step" id="step"></div>
+
+    <div class="card output">
+      <div class="output-head">
+        <h2>Output</h2>
+        <span class="run-state" id="run-state"></span>
+        <button type="button" class="btn-link" id="clear-output">Clear</button>
+      </div>
+      <div class="log" role="log" aria-live="polite" id="log">
+        <div class="log-empty">Run a step to see its output here.</div>
+      </div>
+    </div>
+  </section>
+
+  <aside aria-label="Deck health" class="aside">
+    <div class="card">
+      <h2>Decks</h2>
+      <div class="deck-list" id="deck-list"></div>
+    </div>
+    <div class="card" id="health"></div>
+    <div class="card">
+      <h2>Advice</h2>
+      <div class="advice" id="advice"></div>
+    </div>
+  </aside>
+</main>
+</body>
+</html>
