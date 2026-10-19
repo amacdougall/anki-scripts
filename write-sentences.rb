@@ -1,107 +1,92 @@
 #!/usr/bin/env ruby
+# frozen_string_literal: true
 
-require 'optparse'
-require_relative 'lib/anki_connect'
+# Writes generated example sentences from generate-sentences.rb's YAML file back
+# to Anki, the last step of the sentence round trip. Refuses to write if the
+# file was extracted from another deck, or if any of its notes aren't in the
+# target deck.
+
+require 'set'
+require_relative 'lib/script_cli'
 require_relative 'lib/sentence_writer'
-require_relative 'lib/progress_reporter'
 
-# Parse command-line arguments
-options = {
-  input: File.join(__dir__, 'temp', 'example-sentences.yaml'),
-  dry_run: false,
-  only_note_ids: []
-}
+cli = ScriptCLI.new(
+  'write-sentences.rb',
+  'Writes generated sentences from a YAML file to the notes in the target deck.'
+)
+options = cli.options
+options[:input] = File.join(__dir__, 'temp', 'example-sentences.yaml')
+options[:only_note_ids] = []
+cli.on('--input FILE', 'Input YAML file (default: temp/example-sentences.yaml)') { |file| options[:input] = file }
+cli.dry_run
+cli.on('--only-note-ids IDS', 'Comma-separated note IDs to update') do |ids|
+  options[:only_note_ids] = ids.split(',').map(&:to_i)
+end
+cli.parse!
 
-OptionParser.new do |opts|
-  opts.banner = "Usage: write-sentences.rb [options]"
-  opts.separator ""
-  opts.separator "Writes generated sentences from YAML file to Anki database."
-  opts.separator ""
-  opts.separator "Options:"
-
-  opts.on("--input FILE", "Input YAML file (default: temp/example-sentences.yaml)") do |file|
-    options[:input] = file
-  end
-
-  opts.on("--dry-run", "Preview changes without modifying database") do
-    options[:dry_run] = true
-  end
-
-  opts.on("--only-note-ids IDS", "Comma-separated note IDs to update") do |ids|
-    options[:only_note_ids] = ids.split(',').map(&:to_i)
-  end
-
-  opts.on("-h", "--help", "-?", "Show this message") do
-    puts opts
-    exit
-  end
-end.parse!
-
-# Validate input file exists
 unless File.exist?(options[:input])
-  puts "Error: Input file not found: #{options[:input]}"
-  exit 1
+  ProgressReporter.error("Input file not found: #{options[:input]}")
+  exit ScriptCLI::EXIT_ERROR
 end
 
-# Anki must be running with the AnkiConnect add-on installed.
-AnkiConnect.require_running!
+deck = options[:target_deck]
 
-# Load and process data
 begin
   writer = SentenceWriter.new(options[:input], options)
 
-  # Load YAML
   puts "Loading sentences from: #{options[:input]}"
   data = writer.load_yaml
 
-  # Validate structure
   unless writer.validate_yaml_structure(data)
-    puts "Error: Invalid YAML structure"
-    exit 1
+    ProgressReporter.error('Invalid YAML structure')
+    exit ScriptCLI::EXIT_ERROR
   end
 
-  # Filter and validate notes
+  file_deck = data.dig('metadata', 'target_deck')
+  if file_deck && file_deck != deck
+    cli.usage_error("#{options[:input]} was extracted from deck '#{file_deck}', not '#{deck}'")
+  end
+
   notes = writer.filter_notes(data['notes'])
 
   if notes.empty?
-    puts "No valid notes to update."
-    exit 0
+    puts 'No valid notes to update.'
+    exit ScriptCLI::EXIT_OK
   end
 
   puts "Found #{notes.size} note(s) to update"
-  puts ""
+  puts ''
 
-  # Connect to Anki
-  db = AnkiConnect.new.connect
+  db = cli.connect!
 
   begin
+    deck_note_ids = cli.notes(db).map { |note| note[:id] }.to_set
+    outside = notes.reject { |note| deck_note_ids.include?(note['note_id']) }
+    unless outside.empty?
+      sample = outside.first(5).map { |note| "#{note['note_id']} (#{note['word']})" }.join(', ')
+      ProgressReporter.error("#{outside.size} note(s) in the file aren't in deck '#{deck}', e.g. #{sample}. " \
+                             'Nothing was written.')
+      exit ScriptCLI::EXIT_ERROR
+    end
+
     if options[:dry_run]
       writer.dry_run_preview(notes, db)
     else
-      puts "Updating notes..."
-      puts ""
+      puts 'Updating notes...'
+      puts ''
       writer.write_to_database(notes, db)
-      puts ""
-      ProgressReporter.success("All updates completed successfully!")
+      puts ''
+      ProgressReporter.success('All updates completed successfully!')
+      ProgressReporter.summary(writer.stats)
     end
-
-    # Display summary
-    ProgressReporter.summary(writer.stats) unless options[:dry_run]
-
   ensure
     db.close
   end
 
-  # Exit with appropriate code
-  if writer.stats[:errors] > 0
-    exit 1
-  else
-    exit 0
-  end
-
-rescue => e
-  puts ""
+  exit(writer.stats[:errors] > 0 ? ScriptCLI::EXIT_ERROR : ScriptCLI::EXIT_OK)
+rescue StandardError => e
+  puts ''
   ProgressReporter.error("Fatal error: #{e.message}")
   puts e.backtrace.first(5).join("\n") if ENV['DEBUG']
-  exit 1
+  exit ScriptCLI::EXIT_ERROR
 end

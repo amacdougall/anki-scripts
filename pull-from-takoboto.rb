@@ -11,63 +11,58 @@
 # Kaishi 1.5k cards.
 #
 # Usage:
-#   pull-from-takoboto.rb --source 'Takoboto Various' --target 'My Vocab'
+#   pull-from-takoboto.rb --source-deck 'Takoboto Various' --target-deck 'My Vocab'
 #
 # Steps:
-#   1. Read the Japanese (word) field from every jp.takoboto note in --source.
+#   1. Read the Japanese (word) field from every jp.takoboto note in --source-deck.
 #   2. Write a temp YAML file in add-cards.rb's expected format.
-#   3. Run add-cards.rb on it (which builds the cards in --target).
-#   4. Prompt to clean up the tempfile and/or the source deck.
+#   3. Run add-cards.rb on it (which builds the cards in --target-deck).
+#   4. Clean up the tempfile and/or the source deck, as --cleanup says or, without
+#      it, as you answer at the prompt.
 #
 # Deleting the Takoboto source deck is safe: Takoboto can trivially recreate it.
 
 require 'fileutils'
-require 'optparse'
 require 'yaml'
-require_relative 'lib/anki_connect'
-require_relative 'lib/progress_reporter'
+require_relative 'lib/script_cli'
 
 TAKOBOTO_NOTE_TYPE = 'jp.takoboto'
 TAKOBOTO_WORD_IDX = 0 # the "Japanese" field
 
+# Answers to the clean-up step: [t]empfile, [s]ource deck, [b]oth, e[x]it.
+CLEANUP_CHOICES = %w[t s b x].freeze
+
 # --- CLI ---
 
-options = { source: nil, target: nil, provider: nil, model: nil }
-
-parser = OptionParser.new do |opts|
-  opts.banner = "Usage: pull-from-takoboto.rb --source SOURCE_DECK --target TARGET_DECK"
-  opts.separator ""
-  opts.separator "Pull words from a Takoboto-generated deck into a target deck."
-  opts.separator ""
-  opts.separator "Options:"
-
-  opts.on("--source DECK", "Takoboto-generated source deck to pull words from") { |d| options[:source] = d }
-  opts.on("--target DECK", "Target deck to add the cards to") { |d| options[:target] = d }
-  opts.on("--provider PROVIDER", "Passed through to add-cards.rb: dictionary-fallback provider (google, claude, or opencode)") do |p|
-    options[:provider] = p
-  end
-  opts.on("-m", "--model MODEL", "Passed through to add-cards.rb: model name for claude/opencode provider") { |m| options[:model] = m }
-  opts.on("-h", "--help", "-?", "Show this message") { puts opts; exit }
+cli = ScriptCLI.new(
+  'pull-from-takoboto.rb',
+  'Pulls the words from a Takoboto-generated deck into a target deck as new Kaishi',
+  'cards, via add-cards.rb (so readings and meanings are looked up fresh).',
+  usage: '--source-deck DECK --target-deck DECK [options]'
+)
+options = cli.options
+options[:source] = nil
+options[:cleanup] = nil
+cli.on("--source-deck DECK", "Takoboto-generated deck to pull words from (required)") { |d| options[:source] = d }
+cli.on("--cleanup CHOICE", CLEANUP_CHOICES,
+       "Afterward, delete the [t]empfile, [s]ource deck, [b]oth, or e[x]it (default: ask)") do |c|
+  options[:cleanup] = c
 end
-parser.parse!
+cli.llm(:word_meaning, providers: %w[claude opencode google], help: 'Passed to add-cards.rb: fallback translation provider')
+cli.parse!
 
-unless options[:source] && options[:target]
-  warn "Error: both --source and --target are required"
-  warn parser.help
-  exit 1
-end
+cli.usage_error('--source-deck is required') unless options[:source]
 
 source_deck = options[:source]
-target_deck = options[:target]
+target_deck = options[:target_deck]
 
 # --- Connect and read words ---
 
-AnkiConnect.require_running!
-db = AnkiConnect.new.connect
+db = cli.connect!
 
 unless db.find_deck_id(source_deck)
   ProgressReporter.error("Source deck '#{source_deck}' not found in Anki.")
-  exit 1
+  exit ScriptCLI::EXIT_ERROR
 end
 
 notes = db.notes_in_deck(source_deck, note_type: TAKOBOTO_NOTE_TYPE)
@@ -75,7 +70,7 @@ words = notes.map { |note| note[:fields][TAKOBOTO_WORD_IDX].to_s.strip }.reject(
 
 if words.empty?
   warn "Error: no #{TAKOBOTO_NOTE_TYPE} words found in '#{source_deck}'."
-  exit 1
+  exit ScriptCLI::EXIT_ERROR
 end
 
 # No pre-filtering here: dedup is word+reading (see DedupChecker), and
@@ -106,20 +101,23 @@ puts ""
 # --- Run add-cards.rb ---
 
 add_cards = File.join(__dir__, 'add-cards.rb')
-add_cards_args = [temp_file]
-add_cards_args.push('--provider', options[:provider]) if options[:provider]
+add_cards_args = [temp_file, '--provider', options[:provider]]
 add_cards_args.push('--model', options[:model]) if options[:model]
 
 unless system(add_cards, *add_cards_args)
+  status = $?.exitstatus || ScriptCLI::EXIT_ERROR
   warn ""
-  warn "add-cards.rb exited with an error; leaving the tempfile and source deck in place."
-  exit 1
+  warn "add-cards.rb exited with status #{status}; leaving the tempfile and source deck in place."
+  exit status
 end
 
 # --- Clean up ---
 
-print "\nClean up: [t]empfile, [s]ource deck, [b]oth, e[x]it: "
-choice = ($stdin.gets || '').strip.downcase
+choice = options[:cleanup]
+unless choice
+  print "\nClean up: [t]empfile, [s]ource deck, [b]oth, e[x]it: "
+  choice = ($stdin.gets || '').strip.downcase
+end
 
 case choice
 when 't'

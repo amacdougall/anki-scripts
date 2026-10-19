@@ -6,7 +6,8 @@ require_relative 'lib/yaml_loader'
 require_relative 'lib/sentence_generator'
 require_relative 'lib/claude_interface'
 require_relative 'lib/opencode_interface'
-require_relative 'lib/llm_defaults'
+require_relative 'lib/llm_config'
+require_relative 'lib/script_cli'
 require_relative 'lib/incremental_yaml_writer'
 
 class GenerateSentences
@@ -77,6 +78,11 @@ class GenerateSentences
         @stats[:successful] += 1
         puts "✓"
 
+      rescue LLMInterface::UsageLimitError => e
+        puts "✗"
+        print_summary
+        ScriptCLI.limit_reached!("#{@options[:provider]} usage limit reached: #{e.message[0, 200]}",
+                                 resume: 'the same command')
       rescue SentenceGenerator::GenerationError => e
         # Log error and continue
         error_note = note.dup
@@ -99,6 +105,7 @@ class GenerateSentences
 
     # Print summary
     print_summary
+    exit(@stats[:failed] > 0 ? ScriptCLI::EXIT_ERROR : ScriptCLI::EXIT_OK)
   end
 
   private
@@ -111,7 +118,7 @@ class GenerateSentences
       overwrite: false,
       limit: nil,
       verbose: false,
-      provider: 'claude',
+      provider: LlmConfig.default_provider,
       model: nil
     }
 
@@ -146,11 +153,12 @@ class GenerateSentences
         options[:verbose] = true
       end
 
-      opts.on('--provider PROVIDER', "LLM provider: claude or opencode (default: claude)") do |p|
+      opts.on('--provider PROVIDER', "LLM provider: #{LlmConfig.providers.join(', ')} (default: #{LlmConfig.default_provider})") do |p|
         options[:provider] = p
       end
 
-      opts.on('-m', '--model MODEL', 'Model name (provider-specific)') do |m|
+      defaults = LlmConfig.providers.map { |p| "#{LlmConfig.default_model(:sentence_generation, p)} for #{p}" }
+      opts.on('-m', '--model MODEL', "Model (default: #{defaults.join('; ')}; see config/llm-models.yaml)") do |m|
         options[:model] = m
       end
 
@@ -221,6 +229,7 @@ class GenerateSentences
 
   def build_metadata(input_data)
     {
+      'target_deck' => input_data.dig('metadata', 'target_deck'),
       'input_file' => @options[:input],
       'generated_at' => Time.now.strftime('%Y-%m-%d %H:%M:%S'),
       'instructions_file' => @options[:instructions],
@@ -245,7 +254,7 @@ class GenerateSentences
   end
 
   def default_model
-    LlmDefaults::SENTENCE_GENERATION[@options[:provider]]
+    LlmConfig.default_model(:sentence_generation, @options[:provider])
   end
 
   def print_summary

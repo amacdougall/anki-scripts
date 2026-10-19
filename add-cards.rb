@@ -3,7 +3,7 @@
 
 # Batch-add vocabulary cards to an Anki deck from a YAML file.
 #
-# Usage: add-cards.rb [options] INPUT_FILE
+# Usage: add-cards.rb [--target-deck DECK] [options] INPUT_FILE
 #
 # Input YAML format:
 #   ---
@@ -17,15 +17,12 @@
 #       sentence_meaning: Thank you for...
 #       note: (from email)
 
-require 'optparse'
 require 'yaml'
-require_relative 'lib/anki_connect'
+require_relative 'lib/script_cli'
 require_relative 'lib/card_creator'
 require_relative 'lib/dedup_checker'
 require_relative 'lib/word_lookup'
-require_relative 'lib/kaishi_fields'
 require_relative 'lib/mecab_controller'
-require_relative 'lib/progress_reporter'
 require_relative 'lib/translator_factory'
 
 def contains_kanji?(text)
@@ -34,42 +31,22 @@ end
 
 # --- CLI ---
 
-options = {
-  deck: nil,
-  dry_run: false,
-  provider: 'opencode',
-  model: nil
-}
-
-parser = OptionParser.new do |opts|
-  opts.banner = "Usage: add-cards.rb [options] INPUT_FILE"
-  opts.separator ""
-  opts.separator "Batch-add vocabulary cards to an Anki deck from a YAML file."
-  opts.separator ""
-  opts.separator "Options:"
-
-  opts.on("--target-deck DECK", "Override target_deck from YAML file") { |d| options[:deck] = d }
-  opts.on("--dry-run", "Preview all cards without writing") { options[:dry_run] = true }
-  opts.on("--provider PROVIDER", "Dictionary-fallback translation provider: opencode, claude, or google (default: opencode)") do |p|
-    options[:provider] = p
-  end
-  opts.on("-m", "--model MODEL", "Model name for claude/opencode provider (default: #{LlmDefaults::TRANSLATION['claude']} / #{LlmDefaults::TRANSLATION['opencode']})") do |m|
-    options[:model] = m
-  end
-  opts.on("-h", "--help", "-?", "Show this message") { puts opts; exit }
-end
-parser.parse!
+cli = ScriptCLI.new(
+  'add-cards.rb',
+  'Batch-adds vocabulary cards to an Anki deck from a YAML file. The deck comes from',
+  "--target-deck or the file's target_deck:, and must already exist.",
+  deck: :optional, usage: '[--target-deck DECK] [options] INPUT_FILE'
+)
+cli.dry_run('Preview the dictionary lookups without adding cards')
+cli.llm(:word_meaning, providers: %w[claude opencode google], help: 'Fallback translation provider')
+options = cli.parse!
 
 input_file = ARGV[0]
-unless input_file
-  warn "Error: INPUT_FILE is required"
-  warn parser.help
-  exit 1
-end
+cli.usage_error('INPUT_FILE is required') unless input_file
 
 unless File.exist?(input_file)
   warn "Error: File not found: #{input_file}"
-  exit 1
+  exit ScriptCLI::EXIT_ERROR
 end
 
 # --- Load YAML ---
@@ -79,14 +56,15 @@ entries = data['entries']
 
 unless entries.is_a?(Array) && !entries.empty?
   warn "Error: YAML file must contain a non-empty 'entries' array"
-  exit 1
+  exit ScriptCLI::EXIT_ERROR
 end
 
-deck_name = options[:deck] || data['target_deck']
-unless deck_name
-  warn "Error: No deck specified. Use --target-deck or set target_deck in the YAML file."
-  exit 1
+deck_name = options[:target_deck] || data['target_deck']
+cli.usage_error('No deck specified. Use --target-deck or set target_deck in the YAML file.') unless deck_name
+if deck_name == ScriptCLI::CURATED_DECK
+  cli.usage_error("'#{deck_name}' is the curated source deck; scripts don't modify it")
 end
+options[:target_deck] = deck_name
 
 puts "Input file:   #{input_file}"
 puts "Target deck:  #{deck_name}"
@@ -97,21 +75,22 @@ puts ""
 entries.each_with_index do |entry, i|
   unless entry['word'] && !entry['word'].strip.empty?
     warn "Error: Entry #{i + 1} is missing required 'word' field"
-    exit 1
+    exit ScriptCLI::EXIT_ERROR
   end
 end
 
-# --- Safety check (skip for dry run, which only previews dictionary lookups) ---
+# --- Check Anki and the deck before the lookups (skipped for a dry run, which
+# only previews them) ---
 
-AnkiConnect.require_running! unless options[:dry_run]
+db = cli.connect! unless options[:dry_run]
 
 # --- Dictionary lookups (before DB operations) ---
 
 translator = begin
-  TranslatorFactory.build(options[:provider], options[:model], deck_name: deck_name)
+  TranslatorFactory.build(options[:provider], options[:model], task: :word_meaning, deck_name: deck_name)
 rescue TranslatorFactory::UnknownProviderError, LLMInterface::NotFoundError => e
   ProgressReporter.error(e.message)
-  exit 1
+  exit ScriptCLI::EXIT_ERROR
 end
 puts "Dictionary-fallback provider: #{options[:provider]}#{" (#{options[:model]})" if options[:model]}"
 puts ""
@@ -136,9 +115,8 @@ entries.each_with_index do |entry, i|
       reading = result[:reading] if reading.nil? || reading.strip.empty?
       meaning = result[:meaning] if meaning.nil? || meaning.strip.empty?
       usually_kana = result[:usually_kana]
-    rescue GoogleTranslateClient::RateLimitError => e
-      ProgressReporter.error("Google Translate rate limit: #{e.message}")
-      exit 3
+    rescue GoogleTranslateClient::RateLimitError, LLMInterface::UsageLimitError => e
+      ScriptCLI.limit_reached!("Stopped by a rate or usage limit before adding any cards: #{e.message[0, 200]}")
     rescue StandardError => e
       ProgressReporter.warning("Lookup failed for '#{word}': #{e.message}")
     end
@@ -187,26 +165,14 @@ end
 
 if options[:dry_run]
   puts "Dry run — no changes made."
-  exit 0
+  exit ScriptCLI::EXIT_OK
 end
 
-# --- Connect and validate ---
-
-db = AnkiConnect.new.connect
+# --- Add the cards ---
 
 stats = { created: 0, skipped_duplicate: 0, errors: 0 }
 
 begin
-  unless db.find_deck_id(deck_name)
-    ProgressReporter.error("Deck '#{deck_name}' not found in Anki. Please create it first.")
-    exit 1
-  end
-
-  unless db.find_note_type_id(CardCreator::NOTE_TYPE_NAME)
-    ProgressReporter.error("Note type '#{CardCreator::NOTE_TYPE_NAME}' not found.")
-    exit 1
-  end
-
   # Dedup against every deck using the Kaishi 1.5k note type, not just
   # deck_name — the same word being added to a staging deck shouldn't
   # duplicate one already sitting in, say, Kaishi 1.5k itself. Key is
@@ -263,6 +229,7 @@ begin
   puts "  Errors:               #{stats[:errors]}"
   puts "=" * 50
 
+  exit(stats[:errors] > 0 ? ScriptCLI::EXIT_ERROR : ScriptCLI::EXIT_OK)
 ensure
   db.close
 end

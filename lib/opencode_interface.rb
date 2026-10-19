@@ -1,7 +1,6 @@
 require 'json'
 require 'open3'
 require_relative 'llm_interface'
-require_relative 'llm_defaults'
 
 class OpenCodeInterface < LLMInterface
   # Running cost of every request made through OpenCode in this process (USD,
@@ -27,10 +26,6 @@ class OpenCodeInterface < LLMInterface
       count = OpenCodeInterface.requests
       puts format('OpenCode cost: $%.4f (%d %s)', OpenCodeInterface.total_cost, count, count == 1 ? 'request' : 'requests')
     end
-  end
-
-  def initialize(model: LlmDefaults::OPENCODE_MODEL, verbose: false)
-    super(model: model, verbose: verbose)
   end
 
   def verify_available!

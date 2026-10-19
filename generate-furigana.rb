@@ -1,10 +1,8 @@
 #!/usr/bin/env ruby
 
-require 'optparse'
-require_relative 'lib/anki_connect'
-require_relative 'lib/kaishi_fields'
+require_relative 'lib/script_cli'
+require_relative 'lib/deck_status'
 require_relative 'lib/mecab_controller'
-require_relative 'lib/progress_reporter'
 require_relative 'lib/text_transforms'
 require_relative 'lib/card_creator'
 require_relative 'lib/jmdict'
@@ -14,7 +12,7 @@ require_relative 'lib/furigana_reviewer'
 
 # Returns true if the text contains any kanji characters
 def contains_kanji?(text)
-  text.match?(/[\u4E00-\u9FFF\u3400-\u4DBF]/)
+  DeckStatus.kanji?(text)
 end
 
 # Returns true if the text contains <ruby> tags
@@ -31,35 +29,10 @@ end
 # or nil when the word isn't in the dictionary. Used to detect words that are
 # usually written in kana alone.
 def jmdict_entry_for(word, reading = '')
-  entries = JMDict.entries_for(CardCreator.strip_ruby_tags(word))
-  return nil if entries.empty?
-
-  by_reading = reading.strip.empty? ? nil : entries.find { |e| WordLookup.entry_has_reading?(e, reading) }
-  by_reading || entries.first
+  WordLookup.entry_for(CardCreator.strip_ruby_tags(word), reading.strip)
 end
 
-# Whether a word is tagged "usually written using kana alone" in JMdict,
-# preferring the entry that matches the note's reading.
-def usually_kana?(word, reading = '')
-  entry = jmdict_entry_for(word, reading)
-  !entry.nil? && WordLookup.usually_kana?(entry)
-end
-
-# Note type to target across all decks
-NOTE_TYPE_NAME = Kaishi::NOTE_TYPE_NAME
-
-# Set once a note's sentence furigana has been through the AI review. Only
-# furigana generated in the same run is reviewed; regenerating clears the tag
-# until the new furigana passes review. --review-unreviewed reviews whatever is
-# left untagged, which is how an interrupted review is resumed.
-REVIEWED_TAG = 'furigana::reviewed'
-
-# Default reviewer: paid per use, with no usage limit. On 80 test sentences
-# (7 errors of 5 kinds) Sonnet caught all 5 kinds; deepseek-v4.1-flash and
-# glm-5.3-flash each caught 3, different ones, with no wrong changes.
-# DeepSeek's output was cleaner (GLM once split 身体[からだ] as 身[から]体[だ]).
-# Use --provider claude --model sonnet for small, high-stakes batches.
-REVIEW_PROVIDER = 'opencode'
+REVIEWED_TAG = DeckStatus::FURIGANA_REVIEWED_TAG
 
 # Sentences per review request. Small enough to keep each response short and
 # easy for the model to get right.
@@ -73,81 +46,37 @@ DEFAULT_REVIEW_JOBS = 4
 WORD_FURIGANA_IDX = Kaishi::WORD_FURIGANA_IDX
 SENTENCE_FURIGANA_IDX = Kaishi::SENTENCE_FURIGANA_IDX
 
-# Parse command-line arguments
-options = {
-  target_deck: nil,
-  dry_run: false,
-  limit: nil,
-  force: false,
-  review: true,
-  review_unreviewed: false,
-  review_provider: REVIEW_PROVIDER,
-  review_model: nil,
-  review_jobs: DEFAULT_REVIEW_JOBS
-}
-
-OptionParser.new do |opts|
-  opts.banner = "Usage: generate-furigana.rb [options]"
-  opts.separator ""
-  opts.separator "Generates furigana in bracket notation for Anki flashcards."
-  opts.separator "When --target-deck is given, operates on that deck only."
-  opts.separator "When omitted, operates on all decks except '#{NOTE_TYPE_NAME}'."
-  opts.separator ""
-  opts.separator "Options:"
-
-  opts.on("-d", "--target-deck DECK", "Target a specific deck (default: all decks except '#{NOTE_TYPE_NAME}')") do |deck|
-    options[:target_deck] = deck
-  end
-
-  opts.on("--dry-run", "Preview changes without modifying database") do
-    options[:dry_run] = true
-  end
-
-  opts.on("--limit N", Integer, "Process only first N notes") do |n|
-    options[:limit] = n
-  end
-
-  opts.on("--force", "Overwrite existing furigana data (and review it again)") do
-    options[:force] = true
-  end
-
-  opts.on("--[no-]review", "AI review of sentence furigana generated this run (default: on)") do |v|
-    options[:review] = v
-  end
-
-  opts.on("--review-unreviewed", "Skip generation; review sentence furigana not yet tagged #{REVIEWED_TAG} " \
-                                 "(resumes a review stopped by a usage limit or failure)") do
-    options[:review_unreviewed] = true
-  end
-
-  opts.on("--provider PROVIDER", "LLM for the review: opencode or claude (default: #{REVIEW_PROVIDER})") do |p|
-    options[:review_provider] = p
-  end
-
-  opts.on("-m", "--model MODEL", "Model for the review (default: #{LlmDefaults::FURIGANA_REVIEW['opencode']}; " \
-                                 "#{LlmDefaults::FURIGANA_REVIEW['claude']} for claude)") do |m|
-    options[:review_model] = m
-  end
-
-  opts.on("--review-jobs N", Integer, "Review batches sent at once (default: #{DEFAULT_REVIEW_JOBS})") do |n|
-    options[:review_jobs] = [n, 1].max
-  end
-
-  opts.on("-h", "--help", "-?", "Show this message") do
-    puts opts
-    exit
-  end
-end.parse!
+cli = ScriptCLI.new(
+  'generate-furigana.rb',
+  'Generates furigana in bracket notation with MeCab, then has an LLM review the',
+  'sentence readings in context (with JMdict readings and the deck\'s name readings as hints).'
+)
+options = cli.options
+options.merge!(review: true, review_unreviewed: false, review_jobs: DEFAULT_REVIEW_JOBS)
+cli.dry_run
+cli.limit
+cli.force('Overwrite existing furigana data (and review it again)')
+cli.on("--[no-]review", "AI review of sentence furigana generated this run (default: on)") do |v|
+  options[:review] = v
+end
+cli.on("--review-unreviewed", "Skip generation; review sentence furigana not yet tagged #{REVIEWED_TAG} " \
+                              "(resumes a review stopped by a usage limit or failure)") do
+  options[:review_unreviewed] = true
+end
+# On 80 test sentences (7 errors of 5 kinds) Sonnet caught all 5 kinds;
+# deepseek-v4.1-flash and glm-5.3-flash each caught 3, different ones, with no
+# wrong changes. OpenCode suits large batches that would spend Claude usage.
+cli.llm(:furigana_review, providers: %w[claude opencode], help: 'LLM for the review')
+cli.on("--review-jobs N", Integer, "Review batches sent at once (default: #{DEFAULT_REVIEW_JOBS})") do |n|
+  options[:review_jobs] = [n, 1].max
+end
+cli.parse!
 
 if options[:review_unreviewed] && (options[:force] || !options[:review])
-  ProgressReporter.error("--review-unreviewed can't be combined with --force or --no-review")
-  exit 1
+  cli.usage_error("--review-unreviewed can't be combined with --force or --no-review")
 end
 
-# Anki must be running with the AnkiConnect add-on installed.
-AnkiConnect.require_running!
-ProgressReporter.success("Connected to Anki via AnkiConnect")
-puts ""
+db = cli.connect!
 
 # Check MeCab availability
 begin
@@ -156,7 +85,7 @@ begin
     ProgressReporter.error("MeCab support files not found in Anki plugin directory")
     puts "Expected location: #{MecabController::MECAB_SUPPORT_DIR}"
     puts "Please ensure the Japanese Furigana plugin is installed in Anki."
-    exit 1
+    exit ScriptCLI::EXIT_ERROR
   end
 
   mecab = MecabController.new
@@ -164,17 +93,16 @@ begin
   puts ""
 rescue => e
   ProgressReporter.error("Failed to initialize MeCab: #{e.message}")
-  exit 1
+  exit ScriptCLI::EXIT_ERROR
 end
 
 reviewer_llm = nil
 if options[:review] && !options[:dry_run]
   begin
-    reviewer_llm = TranslatorFactory.llm(options[:review_provider], options[:review_model],
-                                       defaults: LlmDefaults::FURIGANA_REVIEW)
+    reviewer_llm = TranslatorFactory.llm(options[:provider], options[:model], task: :furigana_review)
   rescue TranslatorFactory::UnknownProviderError, LLMInterface::NotFoundError => e
     ProgressReporter.error("Can't set up the furigana review: #{e.message}")
-    exit 1
+    exit ScriptCLI::EXIT_ERROR
   end
 end
 
@@ -183,57 +111,18 @@ end
 # update check runs here rather than mid-processing.
 JMDict.ensure_current!
 
-db = AnkiConnect.new.connect
-
 begin
-  # Find note type ID
-  puts "Finding note type: #{NOTE_TYPE_NAME}"
-  note_type_id = db.find_note_type_id(NOTE_TYPE_NAME)
-
-  unless note_type_id
-    ProgressReporter.error("Note type not found: #{NOTE_TYPE_NAME}")
-    exit 1
-  end
-
-  # Each note carries its deck name so deck-specific TextTransforms can fire
-  # in the all-decks path. A note can technically have cards in multiple decks,
-  # but for our note type that's a non-case — pick the first card's deck.
-  if options[:target_deck]
-    unless db.find_deck_id(options[:target_deck])
-      ProgressReporter.error("Deck not found: #{options[:target_deck]}")
-      exit 1
-    end
-
-    puts "Targeting deck: #{options[:target_deck]}"
-    all_notes = db.notes_in_deck_with_deck(options[:target_deck], note_type: NOTE_TYPE_NAME)
-  else
-    puts "Targeting all decks except '#{NOTE_TYPE_NAME}'"
-    all_notes = db.notes_in_deck_with_deck(nil, note_type: NOTE_TYPE_NAME, exclude_deck: NOTE_TYPE_NAME)
-  end
-
-  ProgressReporter.success("Found #{all_notes.size} notes with note type '#{NOTE_TYPE_NAME}'")
+  # Each note carries its deck name (a subdeck's, for notes in one) so the
+  # right deck's TextTransforms fire. A note can technically have cards in
+  # multiple decks, but for our note type that's a non-case — pick the first
+  # card's deck.
+  all_notes = cli.notes(db, with_deck: true)
+  ProgressReporter.success("Found #{all_notes.size} #{Kaishi::NOTE_TYPE_NAME} notes")
   puts ""
 
   # Filter notes that need processing (none when only reviewing)
   notes_to_process = options[:review_unreviewed] ? [] : all_notes.select do |note|
-    word = note[:fields][Kaishi::WORD_IDX] || ''
-    word_reading = note[:fields][Kaishi::WORD_READING_IDX] || ''
-    sentence = note[:fields][Kaishi::SENTENCE_IDX] || ''
-    word_furigana = note[:fields][WORD_FURIGANA_IDX] || ''
-    sentence_furigana = note[:fields][SENTENCE_FURIGANA_IDX] || ''
-
-    if !options[:force]
-      needs_word_furigana = !word_furigana.include?('[') && contains_kanji?(word)
-      needs_word_copy = word_furigana.strip.empty? && !word.strip.empty?
-      needs_sentence_furigana = !sentence_furigana.include?('[') && contains_kanji?(sentence)
-      # A plain-kanji word that JMdict marks "usually kana" needs its Word field
-      # rewritten to <ruby>, even if its furigana field is already populated.
-      needs_word_ruby = contains_kanji?(word) && !contains_ruby?(word) &&
-                        usually_kana?(word, word_reading)
-      needs_word_furigana || needs_word_copy || needs_sentence_furigana || needs_word_ruby
-    else
-      true
-    end
+    options[:force] || DeckStatus.needs_furigana?(note)
   end
 
   # Apply limit if specified
@@ -246,9 +135,7 @@ begin
   # run; with --review-unreviewed, every note in scope not yet tagged reviewed.
   review_notes = []
   if options[:review_unreviewed]
-    review_notes = all_notes.select do |note|
-      note[:fields][SENTENCE_FURIGANA_IDX].to_s.include?('[') && !(note[:tags] || []).include?(REVIEWED_TAG)
-    end
+    review_notes = all_notes.select { |note| DeckStatus.needs_furigana_review?(note) }
     review_notes = review_notes.take(options[:limit]) if options[:limit]
     puts "Unreviewed sentence furigana: #{review_notes.size} notes"
   else
@@ -262,7 +149,7 @@ begin
     if !options[:force] && !options[:review_unreviewed]
       puts "Note: Use --force to regenerate existing furigana data"
     end
-    exit 0
+    exit ScriptCLI::EXIT_OK
   end
 
   # Statistics
@@ -431,11 +318,11 @@ begin
 
     if options[:dry_run]
       puts "Would review #{groups.size} unique sentences (#{review_notes.size} notes) " \
-           "with #{options[:review_provider]} [DRY RUN]"
+           "with #{options[:provider]} [DRY RUN]"
     else
-      model_name = options[:review_model] || LlmDefaults::FURIGANA_REVIEW[options[:review_provider]]
+      model_name = options[:model]
       puts "Reviewing #{groups.size} unique sentences (#{review_notes.size} notes) with " \
-           "#{options[:review_provider]} (#{model_name}), #{options[:review_jobs]} batches at a time:"
+           "#{options[:provider]} (#{model_name}), #{options[:review_jobs]} batches at a time:"
       db.remove_tags(review_notes.map { |note| note[:id] }, REVIEWED_TAG)
 
       batches = groups.keys.group_by(&:first).flat_map do |deck, keys|
@@ -555,11 +442,11 @@ begin
 
       if usage_limit_error
         resume = ['./generate-furigana.rb']
-        resume += ['--target-deck', "'#{options[:target_deck]}'"] if options[:target_deck]
-        resume += ['--review-unreviewed', '--provider', options[:review_provider]]
-        resume += ['--model', options[:review_model]] if options[:review_model]
+        resume += ['--target-deck', "'#{options[:target_deck]}'"]
+        resume += ['--review-unreviewed', '--provider', options[:provider]]
+        resume += ['--model', options[:model]]
         puts ""
-        ProgressReporter.error("Stopped the review: #{options[:review_provider]} usage limit reached. " \
+        ProgressReporter.error("Stopped the review: #{options[:provider]} usage limit reached. " \
                                "#{stats[:review_failed]} notes are still unreviewed (untagged).")
         puts "Resume once the limit resets with:"
         puts "  #{resume.join(' ')}"
@@ -594,8 +481,8 @@ begin
     ProgressReporter.success("Successfully updated #{stats[:updated]} notes!")
   end
 
-  # Exit with appropriate code
-  exit(stats[:errors] + stats[:review_failed] > 0 ? 1 : 0)
+  exit ScriptCLI::EXIT_LIMIT if usage_limit_error
+  exit(stats[:errors] + stats[:review_failed] > 0 ? ScriptCLI::EXIT_ERROR : ScriptCLI::EXIT_OK)
 
 ensure
   db.close

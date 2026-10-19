@@ -7,111 +7,35 @@
 # general-purpose. When a card's Word Reading is empty, it's backfilled from the
 # lookup too. Follows the same pattern as add-sentence-meanings.rb.
 #
-# Usage: add-meanings.rb [options]
+# Usage: add-meanings.rb --target-deck DECK [options]
 
-require 'optparse'
-require_relative 'lib/anki_connect'
-require_relative 'lib/kaishi_fields'
+require_relative 'lib/script_cli'
+require_relative 'lib/deck_status'
 require_relative 'lib/card_creator'
 require_relative 'lib/word_lookup'
-require_relative 'lib/progress_reporter'
 require_relative 'lib/translator_factory'
 
-# Note type to target across all decks
-NOTE_TYPE_NAME = Kaishi::NOTE_TYPE_NAME
+cli = ScriptCLI.new(
+  'add-meanings.rb',
+  'Fills empty Word Meaning fields by looking the word up in JMdict, falling back',
+  'to an LLM translation for words JMdict lacks. Backfills an empty Word Reading too.'
+)
+cli.dry_run
+cli.limit
+cli.force('Overwrite existing word meanings')
+cli.llm(:word_meaning, providers: %w[claude opencode google], help: 'Fallback translation provider')
+options = cli.parse!
 
-# Parse command-line arguments
-options = {
-  target_deck: nil,
-  dry_run: false,
-  limit: nil,
-  force: false,
-  provider: 'opencode',
-  model: nil
-}
-
-OptionParser.new do |opts|
-  opts.banner = "Usage: add-meanings.rb [options]"
-  opts.separator ""
-  opts.separator "Fills empty Word Meaning fields by looking the word up in JMdict"
-  opts.separator "(falling back to an LLM translation, see --provider). Backfills Word Reading when empty."
-  opts.separator "When --target-deck is given, operates on that deck only."
-  opts.separator "When omitted, operates on all decks except '#{NOTE_TYPE_NAME}'."
-  opts.separator ""
-  opts.separator "Options:"
-
-  opts.on("-d", "--target-deck DECK", "Target a specific deck (default: all decks except '#{NOTE_TYPE_NAME}')") do |deck|
-    options[:target_deck] = deck
-  end
-
-  opts.on("--dry-run", "Preview changes without modifying database") do
-    options[:dry_run] = true
-  end
-
-  opts.on("--limit N", Integer, "Process only first N notes") do |n|
-    options[:limit] = n
-  end
-
-  opts.on("--force", "Overwrite existing word meanings") do
-    options[:force] = true
-  end
-
-  opts.on("--provider PROVIDER", "Dictionary-fallback translation provider: opencode, claude, or google (default: opencode)") do |p|
-    options[:provider] = p
-  end
-
-  opts.on("-m", "--model MODEL", "Model name for claude/opencode provider (default: #{LlmDefaults::TRANSLATION['claude']} / #{LlmDefaults::TRANSLATION['opencode']})") do |m|
-    options[:model] = m
-  end
-
-  opts.on("-h", "--help", "-?", "Show this message") do
-    puts opts
-    exit
-  end
-end.parse!
-
-# Anki must be running with the AnkiConnect add-on installed.
-AnkiConnect.require_running!
-ProgressReporter.success("Connected to Anki via AnkiConnect")
-puts ""
-
-db = AnkiConnect.new.connect
+db = cli.connect!
 
 begin
-  # Find note type ID
-  puts "Finding note type: #{NOTE_TYPE_NAME}"
-  note_type_id = db.find_note_type_id(NOTE_TYPE_NAME)
-
-  unless note_type_id
-    ProgressReporter.error("Note type not found: #{NOTE_TYPE_NAME}")
-    exit 1
-  end
-
-  if options[:target_deck]
-    unless db.find_deck_id(options[:target_deck])
-      ProgressReporter.error("Deck not found: #{options[:target_deck]}")
-      exit 1
-    end
-
-    puts "Targeting deck: #{options[:target_deck]}"
-    all_notes = db.notes_in_deck(options[:target_deck], note_type: NOTE_TYPE_NAME)
-  else
-    puts "Targeting all decks except '#{NOTE_TYPE_NAME}'"
-    all_notes = db.notes_in_deck(nil, note_type: NOTE_TYPE_NAME, exclude_deck: NOTE_TYPE_NAME)
-  end
-
-  ProgressReporter.success("Found #{all_notes.size} notes with note type '#{NOTE_TYPE_NAME}'")
+  all_notes = cli.notes(db)
+  ProgressReporter.success("Found #{all_notes.size} #{Kaishi::NOTE_TYPE_NAME} notes")
   puts ""
 
-  # Filter notes that need a meaning
   notes_to_process = all_notes.select do |note|
-    word = note[:fields][Kaishi::WORD_IDX] || ''
-    meaning = note[:fields][Kaishi::WORD_MEANING_IDX] || ''
-
-    has_word = !word.strip.empty?
-    needs_meaning = meaning.strip.empty? || options[:force]
-
-    has_word && needs_meaning
+    DeckStatus.needs_word_meaning?(note) ||
+      (options[:force] && !note[:fields][Kaishi::WORD_IDX].to_s.strip.empty?)
   end
 
   if options[:limit]
@@ -125,7 +49,7 @@ begin
     puts "No notes to process!"
     puts ""
     puts "Note: Use --force to regenerate existing meanings" unless options[:force]
-    exit 0
+    exit ScriptCLI::EXIT_OK
   end
 
   # Statistics
@@ -137,10 +61,10 @@ begin
   }
 
   translator = begin
-    TranslatorFactory.build(options[:provider], options[:model], deck_name: options[:target_deck])
+    TranslatorFactory.build(options[:provider], options[:model], task: :word_meaning, deck_name: options[:target_deck])
   rescue TranslatorFactory::UnknownProviderError, LLMInterface::NotFoundError => e
     ProgressReporter.error(e.message)
-    exit 1
+    exit ScriptCLI::EXIT_ERROR
   end
   puts "Dictionary-fallback provider: #{options[:provider]}#{" (#{options[:model]})" if options[:model]}"
   puts ""
@@ -149,6 +73,7 @@ begin
   puts options[:dry_run] ? "Preview mode (no changes will be made):" : "Processing notes:"
   puts ""
 
+  limit_error = nil
   db.transaction do
     notes_to_process.each_with_index do |note, idx|
       note_id = note[:id]
@@ -194,9 +119,8 @@ begin
           end
         end
 
-      rescue GoogleTranslateClient::RateLimitError => e
-        ProgressReporter.error("Rate limit hit: #{e.message}")
-        ProgressReporter.error("Stopping to avoid further rate limiting. #{stats[:updated]} notes were updated before this error.")
+      rescue GoogleTranslateClient::RateLimitError, LLMInterface::UsageLimitError => e
+        limit_error = e
         break
       rescue StandardError => e
         ProgressReporter.progress(idx + 1, stats[:total], "#{word} - Error: #{e.message}")
@@ -224,7 +148,12 @@ begin
     ProgressReporter.success("Successfully updated #{stats[:updated]} notes!")
   end
 
-  exit(stats[:errors] > 0 ? 1 : 0)
+  if limit_error
+    ScriptCLI.limit_reached!("Adding meanings stopped by a rate or usage limit: #{limit_error.message[0, 200]}. " \
+                             "#{stats[:updated]} notes were updated first.")
+  end
+
+  exit(stats[:errors] > 0 ? ScriptCLI::EXIT_ERROR : ScriptCLI::EXIT_OK)
 
 ensure
   db.close
