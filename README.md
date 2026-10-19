@@ -28,10 +28,10 @@ read a `--help` or hand a script to Claude Code and ask what it does.
   installed in Anki. The scripts create and fill cards of its `Kaishi 1.5k`
   note type, and expect its 14 fields as they ship. (You don't have to study
   the deck itself... but you should!)
-- **An LLM CLI**: [Claude Code](https://claude.com/claude-code) (`claude`) or
-  [OpenCode](https://opencode.ai) (`opencode`), logged in. Used to write
-  example sentences, translate them, and review furigana. The scripts use
-  whatever account the CLI is logged into; there are no API keys to manage.
+- **An LLM CLI**: [Claude Code](https://claude.com/claude-code) (`claude`),
+  logged in, and optionally [OpenCode](https://opencode.ai) (`opencode`). Used
+  to write example sentences, translate them, and review furigana. The scripts
+  use whatever account the CLI is logged into; there are no API keys to manage.
 - **A Gemini API key**, for audio. See [Audio](#3-audio).
 - **Optional:** [Whisper](#whisper-reading-check) (an audio double-check) and
   [VOICEVOX](https://voicevox.hiroshiba.jp/) (an older, free audio engine).
@@ -81,15 +81,25 @@ vocabulary: a deck for each book, show, or topic (`とらドラ！`, `呪術廻�
 own [name readings and translation notes](#per-deck-customization). The
 scripts work fine with one big deck too.
 
-**Scope.** Most scripts take `--target-deck DECK`. Without it, they work on
-every Kaishi 1.5k card in your collection **except** the deck named
-`Kaishi 1.5k` itself, which is already complete. If you renamed that deck,
-always pass `--target-deck`, or the scripts will treat its cards as yours.
+**One deck per run.** Every script that changes cards requires
+`--target-deck DECK` (`-d` for short) and works on that deck alone. The deck
+named `Kaishi 1.5k` is refused, since it's already complete.
+
+**See what needs work.** `./deck-status.rb` lists each deck with how many cards
+still need each step (an example sentence, furigana, audio...) and the script
+that does it. The counts use the same checks as the scripts, so they're exactly
+what a run would process. Add `--target-deck` for one deck, or `--json` for
+other tools.
 
 **They only fill in what's missing.** Each script skips cards that already have
 the field it writes, so re-running is safe and cheap. `--force` regenerates
 existing values. Most scripts also take `--dry-run` (preview without writing)
 and `--limit N` (process only N cards); run any script with `-h` for its flags.
+
+**Limits.** If a Claude usage limit or a rate limit stops a run, the script
+says so and exits with status 3; run the same command again once the limit
+resets and it picks up where it stopped. (Other statuses: 0 done, 1 something
+failed, 2 bad options.)
 
 **Back up before bulk changes.** Anki does every write itself, so there's no
 risk of corrupting the collection, but there's also no undo for a script that
@@ -108,6 +118,35 @@ Anki's card browser.
 
 ## 1. Getting words in
 
+### Mined cards
+
+Reader tools can create cards as you read: [Yomitan](https://yomitan.wiki/)
+in the browser, HoshiReader, or Calibre. Set the tool to create **Kaishi 1.5k**
+notes and map at least `Word`, `Word Reading` and `Sentence`. The scripts below
+fill in the rest.
+
+A note on meanings: I leave Yomitan's and HoshiReader's meaning fields unmapped
+and let `add-meanings.rb` fill `Word Meaning` from JMdict, because their
+dictionary output doesn't suit the card. The meanings from my customized
+Calibre are fine, so I keep those. Your mileage may vary.
+
+### From Takoboto
+
+[Takoboto](https://takoboto.jp/), a dictionary app, can send the words
+you look up to an Anki deck, using its own `jp.takoboto` note type. Its
+readings, meanings and sentences aren't what we want, but it's a handy way to
+collect words, and it knows more phrases and idioms than JMdict.
+
+```sh
+./pull-from-takoboto.rb --source-deck 'Takoboto 呪術廻戦' --target-deck $TARGET_DECK
+```
+
+This takes just the words from the Takoboto deck, adds them to the target deck
+as new Kaishi 1.5k cards (via `add-cards.rb`, so everything is looked up
+fresh), and then offers to delete the source deck. Deleting it is safe, since
+Takoboto can recreate it. `--cleanup b` (or `t`, `s`, `x`) answers that
+question up front.
+
 ### From a word list
 
 ```sh
@@ -123,34 +162,6 @@ know. You can also supply the sentence you found the word in. See
 field. The deck must already exist, and words already in your collection
 (same word and reading) are skipped. Add `--dry-run` to preview the lookups.
 
-### From Takoboto
-
-[Takoboto](https://takoboto.jp/), a dictionary app, can send the words
-you look up to an Anki deck, using its own `jp.takoboto` note type. Its
-readings, meanings and sentences aren't what we want, but it's a handy way to
-collect words, and it knows more phrases and idioms than JMdict.
-
-```sh
-./pull-from-takoboto.rb --source 'Takoboto 呪術廻戦' --target $TARGET_DECK
-```
-
-This takes just the words from the Takoboto deck, adds them to the target deck
-as new Kaishi 1.5k cards (via `add-cards.rb`, so everything is looked up
-fresh), and then offers to delete the source deck. Deleting it is safe, since
-Takoboto can recreate it.
-
-### Mined cards
-
-Reader tools can create cards as you read: [Yomitan](https://yomitan.wiki/)
-in the browser, HoshiReader, or Calibre. Set the tool to create **Kaishi 1.5k**
-notes and map at least `Word`, `Word Reading` and `Sentence`. The scripts below
-fill in the rest.
-
-A note on meanings: I leave Yomitan's and HoshiReader's meaning fields unmapped
-and let `add-meanings.rb` fill `Word Meaning` from JMdict, because their
-dictionary output doesn't suit the card. The meanings from my customized
-Calibre are fine, so I keep those. Your mileage may vary.
-
 ## 2. The common workflow
 
 Run these against a deck after adding words, by whatever route. Set
@@ -159,7 +170,7 @@ Run these against a deck after adding words, by whatever route. Set
 Clean up stray HTML that reader tools leave in the Word field:
 
 ```sh
-./strip-word-html.rb
+./strip-word-html.rb --target-deck $TARGET_DECK
 ```
 
 ### Example sentences
@@ -173,22 +184,22 @@ sentences before they go into Anki:
   --output temp/words.yaml \
   --target-deck $TARGET_DECK
 
-rm temp/example-sentences.yaml   # if starting fresh
-
 ./generate-sentences.rb \
-  --provider claude --model sonnet \
   --input temp/words.yaml \
   --output temp/example-sentences.yaml \
   --instructions-file prompts/example-sentence-instructions.md \
+  --overwrite \
   --verbose
 
 ./write-sentences.rb \
-  --input temp/example-sentences.yaml
+  --input temp/example-sentences.yaml \
+  --target-deck $TARGET_DECK
 ```
 
 `generate-sentences.rb` saves after every word, and if it's interrupted, a
-re-run picks up where it left off; that's why you delete the output file to
-start fresh. The prompt is in
+re-run without `--overwrite` picks up where it left off. The YAML file
+remembers which deck it came from, and `write-sentences.rb` refuses to write
+it to any other deck. The prompt is in
 [`prompts/example-sentence-instructions.md`](prompts/example-sentence-instructions.md).
 Copy and adjust it for a deck that needs a different flavor (technical
 vocabulary, a manga's setting), and pass the copy as `--instructions-file`.
@@ -200,10 +211,10 @@ In almost every case, run:
 
 ```sh
 ./add-meanings.rb --target-deck $TARGET_DECK   # if needed
-./add-sentence-meanings.rb --provider claude --model sonnet --target-deck $TARGET_DECK
-./generate-furigana.rb --target-deck $TARGET_DECK --provider claude --model sonnet
-./generate-pitch-accent.rb
-./add-jmdict-grammar-notes.rb
+./add-sentence-meanings.rb --target-deck $TARGET_DECK
+./generate-furigana.rb --target-deck $TARGET_DECK
+./generate-pitch-accent.rb --target-deck $TARGET_DECK
+./add-jmdict-grammar-notes.rb --target-deck $TARGET_DECK
 ```
 
 | Script | What it does |
@@ -211,13 +222,15 @@ In almost every case, run:
 | `add-meanings.rb` | Fills an empty Word Meaning from JMdict (LLM fallback), and an empty Word Reading too. Needed for some mined cards; cards from `add-cards.rb` already have both. |
 | `add-sentence-meanings.rb` | Translates sentences that have no English yet. |
 | `generate-furigana.rb` | Writes furigana for the word and sentence with MeCab, then has an LLM check the sentence readings in context. MeCab gives each word one reading regardless of context (身体 as しんたい where the sentence means からだ); the review catches these, with JMdict's readings as a reference. |
-| `generate-pitch-accent.rb` | Draws the pitch-accent diagram from Wadoku's data. (You'll want to enable pitch accent display in the Kaishi note template or this will have no visible effect.) It has no `--target-deck`; it covers every card in scope, and skips words Wadoku doesn't know. |
+| `generate-pitch-accent.rb` | Draws the pitch-accent diagram from Wadoku's data. (You'll want to enable pitch accent display in the Kaishi note template or this will have no visible effect.) Words Wadoku doesn't know are tagged `pitch-accent::unavailable` and left as gaps; the audio carries pitch too. `--force` retries them. |
 | `add-jmdict-grammar-notes.rb` | Adds short grammar notes from JMdict to the Notes field: transitive or intransitive, な/い adjective, counter, onomatopoeia, honorific, and so on. |
 
-`--provider` takes `claude` or `opencode`. Without it, the scripts use
-OpenCode with a small, cheap model; `claude --model sonnet` is more careful but
-uses your Claude plan's usage. Default models are set in
-[`lib/llm_defaults.rb`](lib/llm_defaults.rb).
+`--provider` takes `claude` (the default) or `opencode`; the meaning scripts
+also take `google`. OpenCode is pay-per-use, so it suits big batches that would
+eat into your Claude plan's usage. Each task's default model, and the models
+offered for each provider, are in
+[`config/llm-models.yaml`](config/llm-models.yaml); `--model` overrides it for
+one run.
 
 ### Sorting by frequency (optional)
 
@@ -232,7 +245,7 @@ because I like my words to come up in the order I added them.
 ## 3. Audio
 
 ```sh
-./generate-gemini-audio.rb
+./generate-gemini-audio.rb --target-deck $TARGET_DECK
 ```
 
 This generates word and sentence audio for every card missing it, with Gemini
@@ -248,7 +261,7 @@ the hassle of setting up the [API key](#gemini-api-key). The default model
 sentence) at launch pricing, which runs through 2026-12-31 and doubles after.
 Literally a bargain at twice the price.
 
-Useful flags: `--target-deck`, `--word-only`, `--sentence-only`, `--limit`,
+Useful flags: `--word-only`, `--sentence-only`, `--limit`,
 `--jobs N` (concurrent requests, default 8; lower it if you hit rate limits),
 and `--dry-run`. An interrupted run resumes where it left off: re-run the same
 command.
@@ -312,6 +325,7 @@ per deck:
 ## Other scripts
 
 ```sh
+./deck-status.rb          # what each deck still needs (see How the scripts work)
 ./backup-collection.sh    # snapshot the collection (quit Anki first)
 ./export-seen-words.rb    # every word you've studied, for the curious
 ```
@@ -323,6 +337,8 @@ per deck:
 [`doc/anki-interaction.md`](doc/anki-interaction.md) describes how the scripts
 talk to Anki, the Kaishi field layout, and the tags they use, if you want to
 write your own.
+
+The shared pieces have unit tests: `bundle exec rake test`.
 
 ## Data sources and credits
 

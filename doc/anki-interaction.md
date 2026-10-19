@@ -136,35 +136,47 @@ read/written over AnkiConnect (`add_tags` / `remove_tags`; reads carry `:tags`).
 |-----|---------|--------|
 | `generated::grammar` | Grammar notes added from JMdict | `add-jmdict-grammar-notes.rb` |
 | `generated::pitch-accent` | Pitch-accent field auto-generated | `generate-pitch-accent.rb` |
+| `pitch-accent::unavailable` | Wadoku has no (unambiguous) entry; an accepted gap | `generate-pitch-accent.rb` |
+| `furigana::reviewed` | Sentence furigana passed the LLM review | `generate-furigana.rb` |
+| `audio::pending::word` / `audio::pending::sentence` | Clip queued; removed once written (resume marker) | `generate-gemini-audio.rb` |
 | `generated::llm-sentence` | Example sentence written from LLM-generated YAML | `lib/sentence_writer.rb` |
 | `voice::male` / `voice::female` | TTS voice-gender preference (human-set) | manual; read by both audio scripts |
 
 These replaced older `<!-- ... -->` comment markers; the scripts still read the
-old markers as a fallback.
+old markers as a fallback. `lib/deck_status.rb` defines the tag names and, per
+field, what counts as needing work; scripts select notes with it and
+`deck-status.rb` counts with it.
 
 ## Script Boilerplate Pattern
 
+Scripts that change a deck use `ScriptCLI` (`lib/script_cli.rb`) for their
+flags and pre-flight checks, and `DeckStatus` to pick their notes:
+
 ```ruby
 #!/usr/bin/env ruby
-require_relative 'lib/anki_connect'
-require_relative 'lib/kaishi_fields'
+require_relative 'lib/script_cli'
+require_relative 'lib/deck_status'
 
-# 1. Require Anki to be running (the only safety check now)
-AnkiConnect.require_running!
+cli = ScriptCLI.new('add-meanings.rb', 'Fills empty Word Meaning fields.')
+cli.dry_run                         # --dry-run
+cli.limit                           # --limit N
+cli.force('Overwrite existing word meanings')
+cli.llm(:word_meaning)              # --provider / -m (config/llm-models.yaml)
+options = cli.parse!                # -d/--target-deck is required
 
-# 2. Connect
-db = AnkiConnect.new.connect
-
-# 3. Enumerate, modify, write
-db.notes_in_deck('専門用語', note_type: 'Kaishi 1.5k').each do |note|
+db = cli.connect!                   # Anki running, note type and deck exist
+notes = cli.notes(db).select { |note| options[:force] || DeckStatus.needs_word_meaning?(note) }
+notes.each do |note|
   fields = note[:fields]
   # ... modify fields[Kaishi::*_IDX] ...
-  db.update_note(note[:id], fields)
+  db.update_note(note[:id], fields) unless options[:dry_run]
 end
 ```
 
-Read-only scripts simply skip the writes. Most scripts also support
-`--target-deck DECK`, `--dry-run`, `--limit N`, and `--force`.
+`--target-deck` is required (add-cards.rb also accepts its YAML file's
+`target_deck:`), and the curated `Kaishi 1.5k` deck is refused. Exit statuses
+are the same everywhere: 0 success, 1 error, 2 bad options, 3 stopped by a
+rate or usage limit (re-run to resume).
 
 ## Anki Browser Query Cheatsheet
 
