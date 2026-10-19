@@ -1,21 +1,13 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require 'optparse'
-require_relative 'lib/anki_connect'
-require_relative 'lib/kaishi_fields'
+require_relative 'lib/script_cli'
+require_relative 'lib/deck_status'
 require_relative 'lib/jmdict'
 
-# Constants
-NOTE_TYPE_NAME = Kaishi::NOTE_TYPE_NAME
-# The "already processed" signal is now this Anki tag. The legacy HTML-comment
-# markers below are still *read* (fallback) so notes annotated before the tag
-# migration aren't reprocessed; they are no longer written.
-GRAMMAR_TAG = 'generated::grammar'
-GRAMMAR_MARKER = '<!-- jmdict-grammar -->'
-# Marker written by earlier runs (before the JMdict switch); still recognized so
-# already-annotated notes aren't reprocessed or duplicated.
-LEGACY_GRAMMAR_MARKER = '<!-- jisho-grammar -->'
+# The "already processed" signal. DeckStatus also recognizes the HTML-comment
+# markers earlier runs wrote, so those notes aren't reprocessed.
+GRAMMAR_TAG = DeckStatus::GRAMMAR_TAG
 
 # Strip ruby tags from text, keeping only the base characters (not furigana)
 # e.g., "<ruby>食<rt>た</rt></ruby>べる" => "食べる"
@@ -102,90 +94,31 @@ def update_note_with_grammar(db, note_id, grammar_notes, existing_notes)
   db.add_tags(note_id, GRAMMAR_TAG)
 end
 
-def get_all_notes(db, target_deck: nil)
-  if target_deck
-    unless db.find_deck_id(target_deck)
-      puts "Error: Deck not found: #{target_deck}"
-      exit 1
-    end
-
-    puts "Targeting deck: #{target_deck}"
-    db.notes_in_deck(target_deck, note_type: NOTE_TYPE_NAME)
-  else
-    puts "Targeting all decks except '#{NOTE_TYPE_NAME}'"
-    db.notes_in_deck(nil, note_type: NOTE_TYPE_NAME, exclude_deck: NOTE_TYPE_NAME)
-  end
-end
-
 def main
-  # Parse command line options
-  options = {
-    dry_run: false,
-    limit: nil,
-    target_deck: nil
-  }
+  cli = ScriptCLI.new(
+    'add-jmdict-grammar-notes.rb',
+    'Adds grammar notes from JMdict (transitivity, adjective type, counter, onomatopoeia,',
+    'honorific...) to the Notes field.'
+  )
+  options = cli.options
+  cli.dry_run
+  cli.limit
+  cli.force('Re-process notes already marked as processed')
+  cli.on('--ruby-only', 'Only process notes with <ruby> tags in the Word field') { options[:ruby_only] = true }
+  cli.parse!
 
-  OptionParser.new do |opts|
-    opts.banner = "Usage: #{$PROGRAM_NAME} [options]"
-    opts.separator ""
-    opts.separator "Adds grammatical usage notes from JMdict to Anki cards."
-    opts.separator "Operates on all notes using the '#{NOTE_TYPE_NAME}' note type."
-    opts.separator ""
-    opts.separator "Options:"
-
-    opts.on('--limit N', Integer, 'Limit number of notes to process') do |n|
-      options[:limit] = n
-    end
-
-    opts.on('--dry-run', 'Preview changes without modifying database') do
-      options[:dry_run] = true
-    end
-
-    opts.on('--ruby-only', 'Only process notes with <ruby> tags in Word field') do
-      options[:ruby_only] = true
-    end
-
-    opts.on('--force', 'Re-process notes even if already marked with grammar marker') do
-      options[:force] = true
-    end
-
-    opts.on('--target-deck DECK', 'Target a specific deck (default: all decks except "Kaishi 1.5k")') do |deck|
-      options[:target_deck] = deck
-    end
-
-    opts.on('-h', '--help', 'Display this help') do
-      puts opts
-      exit
-    end
-  end.parse!
-
-  # Anki must be running with the AnkiConnect add-on installed.
-  AnkiConnect.require_running!
-
-  # Connect to Anki
-  db = AnkiConnect.new.connect
+  db = cli.connect!
 
   begin
-    # Find note type ID
-    note_type_id = db.find_note_type_id(NOTE_TYPE_NAME)
-    unless note_type_id
-      puts "Error: Note type '#{NOTE_TYPE_NAME}' not found"
-      exit 1
-    end
+    notes = cli.notes(db).select do |note|
+      next false if options[:ruby_only] && !note[:fields][Kaishi::WORD_IDX].to_s.include?('<ruby>')
 
-    # Fetch notes: either from a specific deck, or all except the curated source deck
-    notes = get_all_notes(db, target_deck: options[:target_deck])
-
-    # Apply limit if specified
-    if options[:limit] && options[:limit] < notes.length
-      puts "Found #{notes.length} notes with note type '#{NOTE_TYPE_NAME}' (limiting to #{options[:limit]})"
-      notes = notes.take(options[:limit])
-    else
-      puts "Found #{notes.length} notes with note type '#{NOTE_TYPE_NAME}'"
+      options[:force] || DeckStatus.needs_grammar_notes?(note)
     end
+    notes = notes.take(options[:limit]) if options[:limit]
+    puts "Notes to process: #{notes.length}"
 
     updated_count = 0
-    skipped_count = 0
     no_grammar_count = 0
 
     process_notes = lambda do
@@ -193,22 +126,6 @@ def main
         fields = note[:fields]
         word = fields[Kaishi::WORD_IDX] || ''
         existing_notes = fields[Kaishi::NOTES_IDX] || ''
-
-        # Skip if --ruby-only and word doesn't contain ruby tags
-        if options[:ruby_only] && !word.include?('<ruby>')
-          next
-        end
-
-        # Skip if already processed (unless --force). The generated::grammar tag
-        # is the current signal; the legacy HTML-comment markers are recognized
-        # as a fallback so notes annotated before the migration aren't redone.
-        already_processed = note[:tags]&.include?(GRAMMAR_TAG) ||
-                            existing_notes.include?(GRAMMAR_MARKER) ||
-                            existing_notes.include?(LEGACY_GRAMMAR_MARKER)
-        if already_processed && !options[:force]
-          skipped_count += 1
-          next
-        end
 
         puts "Processing: #{word}"
 
@@ -266,7 +183,6 @@ def main
     puts "\n=== Summary ==="
     puts "Total notes: #{notes.length}"
     puts "#{options[:dry_run] ? 'Would update' : 'Updated'}: #{updated_count}"
-    puts "Skipped (already processed): #{skipped_count}"
     puts "No grammar info: #{no_grammar_count}"
 
   ensure

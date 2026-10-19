@@ -1,24 +1,19 @@
 #!/usr/bin/env ruby
 
 require 'net/http'
-require 'optparse'
 require 'rbconfig'
 require 'tmpdir'
 require 'fileutils'
 require_relative 'lib/gemini_setup'
-require_relative 'lib/anki_connect'
-require_relative 'lib/kaishi_fields'
-require_relative 'lib/progress_reporter'
+require_relative 'lib/script_cli'
+require_relative 'lib/deck_status'
 require_relative 'lib/text_transforms'
 require_relative 'lib/tts_text'
 require_relative 'lib/reading_check'
 
 # Anki field indices (Kaishi 1.5k note type)
-WORD_AUDIO_IDX     = 4
-SENTENCE_AUDIO_IDX = 8
-
-# Note type to target across all decks
-NOTE_TYPE_NAME = Kaishi::NOTE_TYPE_NAME
+WORD_AUDIO_IDX     = Kaishi::WORD_AUDIO_IDX
+SENTENCE_AUDIO_IDX = Kaishi::SENTENCE_AUDIO_IDX
 
 # Lite: ~1/3 cheaper than gemini-3.8-flash-tts, with no audible difference that
 # matters for flashcards (2026-09-26 audition).
@@ -27,10 +22,7 @@ DEFAULT_MODEL = 'gemini-3.8-flash-lite-tts'
 # Resume markers. Every clip this run will generate gets its note tagged first;
 # the tag comes off once the clip is written. Notes still tagged (after an abort,
 # a failure or Ctrl-C) are picked up by the next run even without --force.
-PENDING_TAGS = {
-  'word' => 'audio::pending::word',
-  'sent' => 'audio::pending::sentence'
-}.freeze
+PENDING_TAGS = DeckStatus::AUDIO_PENDING_TAGS
 
 # Concurrent Whisper transcriptions for the reading check. Each loads the model
 # (~1.6 GB) and uses the GPU, so this stays well below --jobs.
@@ -95,90 +87,47 @@ end
 
 # ---
 
-options = {
-  dry_run:        false,
-  limit:          nil,
-  force:          false,
-  word_only:      false,
-  sentence_only:  false,
-  target_deck:    nil,
-  word_ruby_only: false,
-  model:          DEFAULT_MODEL,
-  jobs:           DEFAULT_JOBS,
-  voicevox_fallback: true,
-  reading_check:  true,
-  whisper_jobs:   DEFAULT_WHISPER_JOBS,
-  check_existing: false
-}
-
-OptionParser.new do |opts|
-  opts.banner = "Usage: generate-gemini-audio.rb [options]"
-  opts.separator ""
-  opts.separator "Generates Japanese audio via Gemini TTS for Anki cards missing audio."
-  opts.separator "Operates on all notes using the '#{NOTE_TYPE_NAME}' note type,"
-  opts.separator "excluding the original '#{NOTE_TYPE_NAME}' deck."
-  opts.separator ""
-  opts.separator "Options:"
-
-  opts.on("--dry-run", "Preview without calling Gemini or modifying the database") do
-    options[:dry_run] = true
-  end
-
-  opts.on("--limit N", Integer, "Process only the first N notes") do |n|
-    options[:limit] = n
-  end
-
-  opts.on("--force", "Regenerate audio even if already present") do
-    options[:force] = true
-  end
-
-  opts.on("--word-only", "Only generate word audio (field #{WORD_AUDIO_IDX})") do
-    options[:word_only] = true
-  end
-
-  opts.on("--sentence-only", "Only generate sentence audio (field #{SENTENCE_AUDIO_IDX})") do
-    options[:sentence_only] = true
-  end
-
-  opts.on("--target-deck DECK", "Restrict to notes in this deck (default: all decks except '#{NOTE_TYPE_NAME}')") do |deck|
-    options[:target_deck] = deck
-  end
-
-  opts.on("--word-ruby-only", "Regenerate word audio only for words with <ruby> furigana, using the ruby reading for TTS") do
-    options[:word_ruby_only] = true
-    options[:word_only]      = true
-    options[:force]          = true
-  end
-
-  opts.on("--model MODEL", "Gemini TTS model (default: #{DEFAULT_MODEL})") do |m|
-    options[:model] = m
-  end
-
-  opts.on("--jobs N", Integer, "Clips to generate concurrently (default: #{DEFAULT_JOBS})") do |n|
-    options[:jobs] = [n, 1].max
-  end
-
-  opts.on("--[no-]voicevox-fallback", "Regenerate clips Gemini's content filter blocks with generate-voicevox-audio.rb (default: on; skipped if no VOICEVOX server is running)") do |v|
-    options[:voicevox_fallback] = v
-  end
-
-  opts.on("--[no-]reading-check", "Transcribe each clip with Whisper and retry misread words in kana (default: on)") do |v|
-    options[:reading_check] = v
-  end
-
-  opts.on("--check-existing", "Run the reading check on existing audio instead of generating; regenerate (in kana) only clips that fail") do
-    options[:check_existing] = true
-  end
-
-  opts.on("--whisper-jobs N", Integer, "Concurrent Whisper transcriptions (default: #{DEFAULT_WHISPER_JOBS})") do |n|
-    options[:whisper_jobs] = [n, 1].max
-  end
-
-  opts.on("-h", "--help", "-?", "Show this message") do
-    puts opts
-    exit
-  end
-end.parse!
+cli = ScriptCLI.new(
+  'generate-gemini-audio.rb',
+  'Generates Japanese word and sentence audio via Gemini TTS for cards missing it.'
+)
+options = cli.options
+options.merge!(word_only: false, sentence_only: false, word_ruby_only: false, model: DEFAULT_MODEL,
+               jobs: DEFAULT_JOBS, voicevox_fallback: true, reading_check: true,
+               whisper_jobs: DEFAULT_WHISPER_JOBS, check_existing: false)
+cli.dry_run('Preview without calling Gemini or modifying Anki')
+cli.limit
+cli.force('Regenerate audio even if already present')
+cli.on("--word-only", "Only generate word audio (field #{WORD_AUDIO_IDX})") do
+  options[:word_only] = true
+end
+cli.on("--sentence-only", "Only generate sentence audio (field #{SENTENCE_AUDIO_IDX})") do
+  options[:sentence_only] = true
+end
+cli.on("--word-ruby-only", "Regenerate word audio only for words with <ruby> furigana, using the ruby reading for TTS") do
+  options[:word_ruby_only] = true
+  options[:word_only]      = true
+  options[:force]          = true
+end
+cli.on("--model MODEL", "Gemini TTS model (default: #{DEFAULT_MODEL})") do |m|
+  options[:model] = m
+end
+cli.on("--jobs N", Integer, "Clips to generate concurrently (default: #{DEFAULT_JOBS})") do |n|
+  options[:jobs] = [n, 1].max
+end
+cli.on("--[no-]voicevox-fallback", "Regenerate clips Gemini's content filter blocks with generate-voicevox-audio.rb (default: on; skipped if no VOICEVOX server is running)") do |v|
+  options[:voicevox_fallback] = v
+end
+cli.on("--[no-]reading-check", "Transcribe each clip with Whisper and retry misread words in kana (default: on)") do |v|
+  options[:reading_check] = v
+end
+cli.on("--check-existing", "Run the reading check on existing audio instead of generating; regenerate (in kana) only clips that fail") do
+  options[:check_existing] = true
+end
+cli.on("--whisper-jobs N", Integer, "Concurrent Whisper transcriptions (default: #{DEFAULT_WHISPER_JOBS})") do |n|
+  options[:whisper_jobs] = [n, 1].max
+end
+cli.parse!
 
 # ---
 
@@ -224,16 +173,14 @@ end
 
 if VOICES.empty?
   ProgressReporter.error("No voices configured: fill in FEMALE_VOICES / MALE_VOICES")
-  exit 1
+  exit ScriptCLI::EXIT_ERROR
 end
 
-# Anki must be running with the AnkiConnect add-on installed.
-AnkiConnect.require_running!
-ProgressReporter.success("Connected to Anki via AnkiConnect")
 if options[:check_existing] && (!options[:reading_check] || options[:force])
-  ProgressReporter.error("--check-existing can't be combined with --no-reading-check or --force")
-  exit 1
+  cli.usage_error("--check-existing can't be combined with --no-reading-check or --force")
 end
+
+db = cli.connect!
 
 puts "Using Gemini model #{options[:model]}"
 if options[:reading_check] && !options[:dry_run]
@@ -241,7 +188,7 @@ if options[:reading_check] && !options[:dry_run]
     puts "Reading check on (Whisper, #{options[:whisper_jobs]} at a time)"
   elsif options[:check_existing]
     ProgressReporter.error("--check-existing needs Whisper; run ./setup-whisper.sh first")
-    exit 1
+    exit ScriptCLI::EXIT_ERROR
   else
     puts "Reading check skipped: Whisper isn't set up (run ./setup-whisper.sh to enable it)"
     options[:reading_check] = false
@@ -249,33 +196,11 @@ if options[:reading_check] && !options[:dry_run]
 end
 puts ""
 
-db = AnkiConnect.new.connect
-
 begin
-  puts "Finding note type: #{NOTE_TYPE_NAME}"
-  note_type_id = db.find_note_type_id(NOTE_TYPE_NAME)
-
-  unless note_type_id
-    ProgressReporter.error("Note type not found: #{NOTE_TYPE_NAME}")
-    exit 1
-  end
-
-  # Each note carries its deck name so deck-specific TextTransforms can fire
-  # in the all-decks path.
-  if options[:target_deck]
-    unless db.find_deck_id(options[:target_deck])
-      ProgressReporter.error("Deck not found: #{options[:target_deck]}")
-      exit 1
-    end
-
-    puts "Targeting deck: #{options[:target_deck]}"
-    all_notes = db.notes_in_deck_with_deck(options[:target_deck], note_type: NOTE_TYPE_NAME)
-  else
-    puts "Targeting all decks except '#{NOTE_TYPE_NAME}'"
-    all_notes = db.notes_in_deck_with_deck(nil, note_type: NOTE_TYPE_NAME, exclude_deck: NOTE_TYPE_NAME)
-  end
-
-  ProgressReporter.success("Found #{all_notes.size} notes with note type '#{NOTE_TYPE_NAME}'")
+  # Each note carries its deck name (a subdeck's, for notes in one) so the
+  # right deck's TextTransforms fire.
+  all_notes = cli.notes(db, with_deck: true)
+  ProgressReporter.success("Found #{all_notes.size} #{Kaishi::NOTE_TYPE_NAME} notes")
   puts ""
 
   notes_to_process = all_notes.select do |note|
@@ -285,18 +210,16 @@ begin
     w_audio = f[WORD_AUDIO_IDX].to_s.strip
     s_audio = f[SENTENCE_AUDIO_IDX].to_s.strip
 
-    tags = note[:tags] || []
-
     # --check-existing targets clips that have audio; otherwise, clips that are
     # forced, missing, or tagged pending.
     if options[:check_existing]
       needs_word = !options[:sentence_only] && !word.empty? && w_audio.include?('[sound:')
       needs_sent = !options[:word_only] && !sent.empty? && s_audio.include?('[sound:')
     else
-      needs_word = !options[:sentence_only] && !word.empty? &&
-                   (options[:force] || w_audio.empty? || tags.include?(PENDING_TAGS['word']))
-      needs_sent = !options[:word_only] && !sent.empty? &&
-                   (options[:force] || s_audio.empty? || tags.include?(PENDING_TAGS['sent']))
+      needs_word = !options[:sentence_only] &&
+                   (options[:force] ? !word.empty? : DeckStatus.needs_word_audio?(note))
+      needs_sent = !options[:word_only] &&
+                   (options[:force] ? !sent.empty? : DeckStatus.needs_sentence_audio?(note))
     end
     needs_word &&= word.include?('<ruby>') if options[:word_ruby_only]
 
@@ -323,7 +246,7 @@ begin
   if notes_to_process.empty?
     puts "No notes need audio generation."
     puts "Use --force to regenerate existing audio." unless options[:force]
-    exit 0
+    exit ScriptCLI::EXIT_OK
   end
 
   stats = {
@@ -698,7 +621,7 @@ begin
       puts "-" * 70
       args = [RbConfig.ruby, voicevox_script, '--force', '--note-ids', note_ids.join(','),
               kind == 'word' ? '--word-only' : '--sentence-only']
-      args += ['--target-deck', options[:target_deck]] if options[:target_deck]
+      args += ['--target-deck', options[:target_deck]]
       if system(*args)
         stats[:blocked_fallback] += note_ids.size
         db.remove_tags(note_ids, PENDING_TAGS[kind])
@@ -754,7 +677,8 @@ begin
     ProgressReporter.success("Done.")
   end
 
-  exit(errors > 0 ? 1 : 0)
+  exit ScriptCLI::EXIT_LIMIT if abort_error
+  exit(errors > 0 ? ScriptCLI::EXIT_ERROR : ScriptCLI::EXIT_OK)
 
 ensure
   db.close

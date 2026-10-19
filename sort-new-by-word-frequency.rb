@@ -1,11 +1,8 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require 'optparse'
-require_relative 'lib/anki_connect'
-require_relative 'lib/kaishi_fields'
+require_relative 'lib/script_cli'
 require_relative 'lib/frequency_database'
-require_relative 'lib/progress_reporter'
 
 # Reorder the *unseen* ("new") Kaishi 1.5k cards in a deck so the most common
 # words come up first, using JPDB v2 frequency ranks (lower rank = more common;
@@ -23,50 +20,17 @@ module SortNewByWordFrequency
   UNRANKED = FrequencyDatabase::UNRANKED
 end
 
-options = { dry_run: false, target_deck: nil }
+cli = ScriptCLI.new(
+  'sort-new-by-word-frequency.rb',
+  "Reschedules the new (unseen) #{Kaishi::NOTE_TYPE_NAME} cards in a deck by word",
+  'frequency, most common first, keeping their existing queue positions as a set.'
+)
+cli.dry_run('Preview the new order without rescheduling')
+options = cli.parse!
 
-parser = OptionParser.new do |opts|
-  opts.banner = 'Usage: sort-new-by-word-frequency.rb --target-deck DECK [options]'
-  opts.separator ''
-  opts.separator "Reschedules the new (unseen) #{Kaishi::NOTE_TYPE_NAME} cards in a deck by word"
-  opts.separator 'frequency, most common first, keeping their existing queue positions as a set.'
-  opts.separator ''
-  opts.separator 'Options:'
-
-  opts.on('-d', '--target-deck DECK', 'Deck to sort (required)') do |deck|
-    options[:target_deck] = deck
-  end
-
-  opts.on('--dry-run', 'Preview the new order without rescheduling') do
-    options[:dry_run] = true
-  end
-
-  opts.on('-h', '--help', '-?', 'Show this message') do
-    puts opts
-    exit
-  end
-end
-parser.parse!
-
-unless options[:target_deck]
-  warn 'Error: --target-deck is required.'
-  warn parser.help
-  exit 1
-end
-
-# Anki must be running with the AnkiConnect add-on installed.
-AnkiConnect.require_running!
-ProgressReporter.success('Connected to Anki via AnkiConnect')
-puts ''
-
-db = AnkiConnect.new.connect
+db = cli.connect!
 
 begin
-  unless db.find_deck_id(options[:target_deck])
-    ProgressReporter.error("Deck not found: #{options[:target_deck]}")
-    exit 1
-  end
-
   deck = options[:target_deck]
   query = %(note:"#{Kaishi::NOTE_TYPE_NAME}" deck:"#{deck}" is:new)
   cards = db.cards_info(query)
@@ -74,7 +38,7 @@ begin
   ProgressReporter.success("Found #{cards.size} new #{Kaishi::NOTE_TYPE_NAME} cards in '#{deck}'")
   if cards.empty?
     puts 'Nothing to sort.'
-    exit 0
+    exit ScriptCLI::EXIT_OK
   end
 
   # Attach a frequency rank to each card (unknown words sort last).
@@ -145,7 +109,7 @@ begin
     ProgressReporter.success("Rescheduled #{stats[:moved]} cards by frequency!")
   end
 
-  exit(stats[:errors] > 0 ? 1 : 0)
+  exit(stats[:errors] > 0 ? ScriptCLI::EXIT_ERROR : ScriptCLI::EXIT_OK)
 ensure
   db.close
 end

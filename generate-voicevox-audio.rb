@@ -3,10 +3,7 @@
 require 'open3'
 require 'uri'
 require 'json'
-require 'optparse'
-require_relative 'lib/anki_connect'
-require_relative 'lib/kaishi_fields'
-require_relative 'lib/progress_reporter'
+require_relative 'lib/script_cli'
 require_relative 'lib/text_transforms'
 require_relative 'lib/tts_text'
 
@@ -15,11 +12,8 @@ require_relative 'lib/tts_text'
 VOICEVOX_URL = ENV.fetch('VOICEVOX_URL', 'http://127.0.0.1:50021').chomp('/')
 
 # Anki field indices (Kaishi 1.5k note type)
-WORD_AUDIO_IDX     = 4
-SENTENCE_AUDIO_IDX = 8
-
-# Note type to target across all decks
-NOTE_TYPE_NAME = Kaishi::NOTE_TYPE_NAME
+WORD_AUDIO_IDX     = Kaishi::WORD_AUDIO_IDX
+SENTENCE_AUDIO_IDX = Kaishi::SENTENCE_AUDIO_IDX
 
 # Speaker pools — ノーマル/natural styles, split by gender
 FEMALE_SPEAKERS = [
@@ -69,65 +63,31 @@ NetworkError = Class.new(StandardError)
 
 # ---
 
-options = {
-  dry_run:        false,
-  limit:          nil,
-  force:          false,
-  word_only:      false,
-  sentence_only:  false,
-  target_deck:    nil,
-  word_ruby_only: false,
-  note_ids:       nil
-}
-
-OptionParser.new do |opts|
-  opts.banner = "Usage: generate-voicevox-audio.rb [options]"
-  opts.separator ""
-  opts.separator "Generates Japanese audio via VOICEVOX for Anki cards missing audio."
-  opts.separator "Operates on all notes using the '#{NOTE_TYPE_NAME}' note type,"
-  opts.separator "excluding the original '#{NOTE_TYPE_NAME}' deck."
-  opts.separator ""
-  opts.separator "Options:"
-
-  opts.on("--dry-run", "Preview without writing files or modifying the database") do
-    options[:dry_run] = true
-  end
-
-  opts.on("--limit N", Integer, "Process only the first N notes") do |n|
-    options[:limit] = n
-  end
-
-  opts.on("--force", "Regenerate audio even if already present") do
-    options[:force] = true
-  end
-
-  opts.on("--word-only", "Only generate word audio (field #{WORD_AUDIO_IDX})") do
-    options[:word_only] = true
-  end
-
-  opts.on("--sentence-only", "Only generate sentence audio (field #{SENTENCE_AUDIO_IDX})") do
-    options[:sentence_only] = true
-  end
-
-  opts.on("--target-deck DECK", "Restrict to notes in this deck (default: all decks except '#{NOTE_TYPE_NAME}')") do |deck|
-    options[:target_deck] = deck
-  end
-
-  opts.on("--note-ids IDS", Array, "Restrict to these note IDs (comma-separated); used by generate-gemini-audio.rb's fallback") do |ids|
-    options[:note_ids] = ids.map { |id| Integer(id) }
-  end
-
-  opts.on("--word-ruby-only", "Regenerate word audio only for words with <ruby> furigana, using the ruby reading for TTS") do
-    options[:word_ruby_only] = true
-    options[:word_only]      = true
-    options[:force]          = true
-  end
-
-  opts.on("-h", "--help", "-?", "Show this message") do
-    puts opts
-    exit
-  end
-end.parse!
+cli = ScriptCLI.new(
+  'generate-voicevox-audio.rb',
+  'Generates Japanese audio via a VOICEVOX server for cards missing it. Mostly used',
+  "as generate-gemini-audio.rb's fallback for clips Gemini's content filter blocks."
+)
+options = cli.options
+options.merge!(word_only: false, sentence_only: false, word_ruby_only: false, note_ids: nil)
+cli.dry_run('Preview without writing files or modifying Anki')
+cli.limit
+cli.force('Regenerate audio even if already present')
+cli.on("--word-only", "Only generate word audio (field #{WORD_AUDIO_IDX})") do
+  options[:word_only] = true
+end
+cli.on("--sentence-only", "Only generate sentence audio (field #{SENTENCE_AUDIO_IDX})") do
+  options[:sentence_only] = true
+end
+cli.on("--note-ids IDS", Array, "Restrict to these note IDs (comma-separated); used by generate-gemini-audio.rb's fallback") do |ids|
+  options[:note_ids] = ids.map { |id| Integer(id) }
+end
+cli.on("--word-ruby-only", "Regenerate word audio only for words with <ruby> furigana, using the ruby reading for TTS") do
+  options[:word_ruby_only] = true
+  options[:word_only]      = true
+  options[:force]          = true
+end
+cli.parse!
 
 # ---
 
@@ -297,10 +257,7 @@ end
 
 # ---
 
-# Anki must be running with the AnkiConnect add-on installed.
-AnkiConnect.require_running!
-ProgressReporter.success("Connected to Anki via AnkiConnect")
-puts ""
+db = cli.connect!
 
 # Pre-flight: verify VOICEVOX is reachable before generating audio
 puts "Checking VOICEVOX at #{VOICEVOX_URL}..."
@@ -315,38 +272,15 @@ begin
 rescue => e
   ProgressReporter.error("Cannot reach VOICEVOX: #{e.message}")
   puts "Make sure VOICEVOX is running at #{VOICEVOX_URL}"
-  exit 1
+  exit ScriptCLI::EXIT_ERROR
 end
 puts ""
 
-db = AnkiConnect.new.connect
-
 begin
-  puts "Finding note type: #{NOTE_TYPE_NAME}"
-  note_type_id = db.find_note_type_id(NOTE_TYPE_NAME)
-
-  unless note_type_id
-    ProgressReporter.error("Note type not found: #{NOTE_TYPE_NAME}")
-    exit 1
-  end
-
-  # Each note carries its deck name so deck-specific TextTransforms can fire
-  # in the all-decks path. A note can technically have cards in multiple decks,
-  # but for our note type that's a non-case — pick the first card's deck.
-  if options[:target_deck]
-    unless db.find_deck_id(options[:target_deck])
-      ProgressReporter.error("Deck not found: #{options[:target_deck]}")
-      exit 1
-    end
-
-    puts "Targeting deck: #{options[:target_deck]}"
-    all_notes = db.notes_in_deck_with_deck(options[:target_deck], note_type: NOTE_TYPE_NAME)
-  else
-    puts "Targeting all decks except '#{NOTE_TYPE_NAME}'"
-    all_notes = db.notes_in_deck_with_deck(nil, note_type: NOTE_TYPE_NAME, exclude_deck: NOTE_TYPE_NAME)
-  end
-
-  ProgressReporter.success("Found #{all_notes.size} notes with note type '#{NOTE_TYPE_NAME}'")
+  # Each note carries its deck name (a subdeck's, for notes in one) so the
+  # right deck's TextTransforms fire.
+  all_notes = cli.notes(db, with_deck: true)
+  ProgressReporter.success("Found #{all_notes.size} #{Kaishi::NOTE_TYPE_NAME} notes")
 
   if options[:note_ids]
     all_notes = all_notes.select { |note| options[:note_ids].include?(note[:id]) }
@@ -375,7 +309,7 @@ begin
   if notes_to_process.empty?
     puts "No notes need audio generation."
     puts "Use --force to regenerate existing audio." unless options[:force]
-    exit 0
+    exit ScriptCLI::EXIT_OK
   end
 
   stats = {
@@ -524,7 +458,7 @@ begin
     ProgressReporter.success("Done.")
   end
 
-  exit((stats[:error_api] + stats[:error_network]) > 0 ? 1 : 0)
+  exit((stats[:error_api] + stats[:error_network]) > 0 ? ScriptCLI::EXIT_ERROR : ScriptCLI::EXIT_OK)
 
 ensure
   db.close

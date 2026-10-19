@@ -1,58 +1,29 @@
 #!/usr/bin/env ruby
 
-require 'optparse'
-require_relative 'lib/anki_connect'
-require_relative 'lib/kaishi_fields'
+require_relative 'lib/script_cli'
+require_relative 'lib/deck_status'
 require_relative 'lib/pitch_database'
 require_relative 'lib/pitch_accent_renderer'
-require_relative 'lib/progress_reporter'
 
-# Field index for pitch accent (Kaishi 1.5k format)
-PITCH_ACCENT_IDX = 10
+PITCH_ACCENT_IDX = Kaishi::PITCH_ACCENT_IDX
+PITCH_ACCENT_TAG = DeckStatus::PITCH_ACCENT_TAG
 
-# Tag marking a note whose pitch-accent field was auto-generated.
-PITCH_ACCENT_TAG = 'generated::pitch-accent'
+# Words Wadoku has no entry for, or several with no reading to choose between,
+# get this tag so they stop counting as missing: a few gaps are fine, since the
+# audio carries the pitch too. --force tries them again.
+UNAVAILABLE_TAG = DeckStatus::PITCH_ACCENT_UNAVAILABLE_TAG
 
-# Note type to target across all decks
-NOTE_TYPE_NAME = Kaishi::NOTE_TYPE_NAME
+cli = ScriptCLI.new(
+  'generate-pitch-accent.rb',
+  "Generates pitch accent diagrams from Wadoku's data. Words Wadoku doesn't know",
+  "(or can't disambiguate without a reading) are tagged #{UNAVAILABLE_TAG} and skipped from then on."
+)
+cli.dry_run
+cli.limit
+cli.force('Regenerate existing pitch accent, and retry words tagged unavailable')
+options = cli.parse!
 
-# Parse command-line arguments
-options = {
-  dry_run: false,
-  limit: nil,
-  force: false
-}
-
-OptionParser.new do |opts|
-  opts.banner = "Usage: generate-pitch-accent.rb [options]"
-  opts.separator ""
-  opts.separator "Generates pitch accent HTML notation for Anki flashcards."
-  opts.separator "Operates on all notes using the '#{NOTE_TYPE_NAME}' note type."
-  opts.separator ""
-  opts.separator "Options:"
-
-  opts.on("--dry-run", "Preview changes without modifying database") do
-    options[:dry_run] = true
-  end
-
-  opts.on("--limit N", Integer, "Process only first N notes") do |n|
-    options[:limit] = n
-  end
-
-  opts.on("--force", "Overwrite existing pitch accent data") do
-    options[:force] = true
-  end
-
-  opts.on("-h", "--help", "-?", "Show this message") do
-    puts opts
-    exit
-  end
-end.parse!
-
-# Anki must be running with the AnkiConnect add-on installed.
-AnkiConnect.require_running!
-ProgressReporter.success("Connected to Anki via AnkiConnect")
-puts ""
+db = cli.connect!
 
 # Load pitch database
 begin
@@ -63,41 +34,16 @@ begin
   puts ""
 rescue => e
   ProgressReporter.error("Failed to load pitch database: #{e.message}")
-  exit 1
+  exit ScriptCLI::EXIT_ERROR
 end
 
-db = AnkiConnect.new.connect
-
 begin
-  # Find note type ID
-  puts "Finding note type: #{NOTE_TYPE_NAME}"
-  note_type_id = db.find_note_type_id(NOTE_TYPE_NAME)
-
-  unless note_type_id
-    ProgressReporter.error("Note type not found: #{NOTE_TYPE_NAME}")
-    exit 1
-  end
-
-  # The deck of the same name is already curated; exclude it
-  all_notes = db.notes_in_deck(nil, note_type: NOTE_TYPE_NAME, exclude_deck: NOTE_TYPE_NAME)
-
-  ProgressReporter.success("Found #{all_notes.size} notes with note type '#{NOTE_TYPE_NAME}'")
+  all_notes = cli.notes(db)
+  ProgressReporter.success("Found #{all_notes.size} #{Kaishi::NOTE_TYPE_NAME} notes")
   puts ""
 
-  # Filter notes that need processing
   notes_to_process = all_notes.select do |note|
-    pitch_field = note[:fields][PITCH_ACCENT_IDX] || ''
-
-    # Skip if already generated (unless --force). The generated::pitch-accent
-    # tag is the current signal; the legacy HTML-comment marker is recognized as
-    # a fallback so pre-migration notes aren't regenerated.
-    already_generated = note[:tags]&.include?(PITCH_ACCENT_TAG) ||
-                        pitch_field.include?(PitchAccentRenderer::GENERATED_MARKER)
-    if !options[:force] && already_generated
-      false
-    else
-      true
-    end
+    options[:force] || DeckStatus.needs_pitch_accent?(note)
   end
 
   # Apply limit if specified
@@ -114,7 +60,7 @@ begin
     if !options[:force]
       puts "Note: Use --force to regenerate existing pitch accent data"
     end
-    exit 0
+    exit ScriptCLI::EXIT_OK
   end
 
   # Statistics
@@ -148,6 +94,7 @@ begin
         readings_list = all_entries.map { |e| "#{e[:reading]} (#{e[:pattern]})" }.join(', ')
         ProgressReporter.progress(idx + 1, stats[:total], "#{word} ⚠ Multiple readings: #{readings_list}")
         stats[:ambiguous] += 1
+        db.add_tags(note_id, UNAVAILABLE_TAG) unless options[:dry_run]
         next
       end
 
@@ -157,6 +104,7 @@ begin
       if pitch_data.nil?
         ProgressReporter.progress(idx + 1, stats[:total], "#{word} (#{reading}) ✗ Not found in database")
         stats[:not_found] += 1
+        db.add_tags(note_id, UNAVAILABLE_TAG) unless options[:dry_run]
         next
       end
 
@@ -178,6 +126,7 @@ begin
       else
         if db.update_note(note_id, fields)
           db.add_tags(note_id, PITCH_ACCENT_TAG)
+          db.remove_tags(note_id, UNAVAILABLE_TAG) if (note[:tags] || []).include?(UNAVAILABLE_TAG)
           ProgressReporter.progress(idx + 1, stats[:total], "#{word} (#{reading}) ✓ Pattern #{pitch_data[:pattern]}")
           stats[:success] += 1
           stats[:updated] += 1
@@ -201,6 +150,7 @@ begin
   puts "  Issues:"
   puts "    Not found:          #{stats[:not_found]}"
   puts "    Ambiguous reading:  #{stats[:ambiguous]}"
+  puts "    (both tagged #{UNAVAILABLE_TAG})" unless options[:dry_run] || stats[:not_found] + stats[:ambiguous] == 0
   puts "    Errors:             #{stats[:errors]}"
   puts "=" * 70
   puts ""
@@ -213,7 +163,7 @@ begin
   end
 
   # Exit with appropriate code
-  exit(stats[:errors] > 0 ? 1 : 0)
+  exit(stats[:errors] > 0 ? ScriptCLI::EXIT_ERROR : ScriptCLI::EXIT_OK)
 
 ensure
   db.close
