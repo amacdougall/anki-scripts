@@ -191,7 +191,8 @@ re-run picks up where it left off; that's why you delete the output file to
 start fresh. The prompt is in
 [`prompts/example-sentence-instructions.md`](prompts/example-sentence-instructions.md).
 Copy and adjust it for a deck that needs a different flavor (technical
-vocabulary, a manga's setting) and pass the copy as `--instructions-file`.
+vocabulary, a manga's setting), and pass the copy as `--instructions-file`.
+`prompts/local/` is gitignored, so it's a good place for your copies.
 
 ### Meanings, furigana, pitch accent, grammar notes
 
@@ -301,9 +302,11 @@ per deck:
   start.
 - **Translation notes** — `prompts/translation/<deck name>.md`. Added to the
   prompt when `add-sentence-meanings.rb --target-deck` translates that deck's
-  sentences with an LLM: who's male or female, how to render recurring terms, the tone. See
-  [`prompts/translation/とらドラ！.md`](prompts/translation/とらドラ！.md).
-- **Sentence prompt** — a copy of the example-sentence prompt, passed to
+  sentences with an LLM: who's male or female, how to render recurring terms,
+  the tone. See [`prompts/translation/とらドラ！.md`](prompts/translation/とらドラ！.md);
+  every other file in that folder is gitignored.
+- **Sentence prompt** — a copy of the example-sentence prompt in
+  `prompts/local/` (gitignored), passed to
   `generate-sentences.rb --instructions-file`.
 
 ## Other scripts

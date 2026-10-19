@@ -9,5 +9,15 @@ backups/
 # Your per-deck name readings (start from config/deck-readings.example.yaml)
 config/deck-readings.yaml
 
+# Your own prompts: per-deck translation notes (とらドラ！.md is the committed
+# example) and deck-specific example-sentence prompts
+prompts/translation/*
+!prompts/translation/とらドラ！.md
+prompts/local/
+
+# Personal working notes
+_scratch.*
+notes/
+
 .bundle/
 .DS_Store
