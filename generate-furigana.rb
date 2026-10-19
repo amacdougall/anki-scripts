@@ -391,14 +391,21 @@ begin
           next
         end
 
-        rejected = result[:rejected].to_h
+        rejected = result[:rejected].to_h { |id, reason, proposed| [id, [reason, proposed]] }
         reviewed_ids = []
         keys.each_with_index do |key, i|
           notes = groups[key]
           sentence = notes.first[:fields][Kaishi::SENTENCE_IDX]
           if rejected.key?(i)
-            puts "  ✗ Rejected correction for #{sentence}: #{rejected[i]}"
+            # Keep the original furigana but count the sentence as reviewed, so
+            # it isn't sent back on every run; the proposal is printed for a
+            # hand edit.
+            reason, proposed = rejected[i]
+            puts "  ✗ Rejected correction for #{sentence}: #{reason}"
+            puts "      proposed: #{proposed}"
+            puts "      kept the original and marked it reviewed (note #{notes.map { |note| note[:id] }.join(', ')}); edit by hand if needed"
             stats[:review_rejected] += 1
+            reviewed_ids.concat(notes.map { |note| note[:id] })
             next
           end
 

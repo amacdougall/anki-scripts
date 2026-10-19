@@ -49,7 +49,7 @@ class FuriganaReviewer
   end
 
   # items: [{ id:, sentence:, furigana: }]. Returns
-  #   { corrections: { id => corrected_furigana }, rejected: [[id, reason]] }
+  #   { corrections: { id => corrected_furigana }, rejected: [[id, reason, proposed_furigana]] }
   # for the items whose furigana the model changed.
   def review(items)
     data = fetch(build_prompt(items))
@@ -65,7 +65,7 @@ class FuriganaReviewer
       next if item.nil? || corrected.empty? || corrected == item[:furigana]
 
       if (reason = invalid_reason(item, corrected))
-        rejected << [item[:id], reason]
+        rejected << [item[:id], reason, corrected]
       else
         corrections[item[:id]] = corrected
       end

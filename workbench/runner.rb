@@ -177,8 +177,8 @@ module Workbench
       code = nil
     ensure
       run.finish(status, code)
-      @mutex.synchronize { @active = nil }
       log(run)
+      @mutex.synchronize { @active = nil }
       begin
         on_finish&.call(run)
       rescue StandardError => e
