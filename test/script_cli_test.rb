@@ -70,6 +70,11 @@ class ScriptCLITest < Minitest::Test
     assert_equal ScriptCLI::EXIT_USAGE, exit_status(c, %w[-d x --provider google])
   end
 
+  def test_limit_reached_exits_with_limit_status
+    error = assert_raises(SystemExit) { capture_io { ScriptCLI.limit_reached!('Usage limit') } }
+    assert_equal ScriptCLI::EXIT_LIMIT, error.status
+  end
+
   def test_google_has_no_model
     c = cli.tap { |x| x.llm(:word_meaning, providers: %w[claude opencode google]) }
     assert_nil c.parse!(%w[-d x --provider google])[:model]
