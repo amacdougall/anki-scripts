@@ -9,8 +9,10 @@ backups/
 # Your per-deck name readings (start from config/deck-readings.example.yaml)
 config/deck-readings.yaml
 
-# The Workbench's remembered per-deck options
+# The Workbench's remembered per-deck options, and what it keeps between
+# sessions (e.g. when the last backup ran)
 config/workbench.local.yaml
+config/workbench.state.yaml
 
 # Your own prompts: per-deck translation notes (とらドラ！.md is the committed
 # example) and deck-specific example-sentence prompts

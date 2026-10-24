@@ -145,7 +145,8 @@ from a terminal with the command it shows. A few details:
 - **Example sentences** pauses after generating, so you can read or edit
   `temp/example-sentences.yaml` before pressing "Write N sentences to Anki".
 - **Back up** runs `./backup-collection.sh`. Quit Anki first (the page will
-  remind you), and reopen it afterward.
+  remind you), and reopen it afterward. It records when the backup ran in
+  `config/workbench.state.yaml` (not committed).
 - It remembers each deck's provider, model and sentence prompt in
   `config/workbench.local.yaml` (not committed), and logs every run to
   `temp/workbench.log`.

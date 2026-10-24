@@ -60,6 +60,7 @@ class AppTest < Minitest::Test
     status = ->(deck) { deck ? STATUS.merge('decks' => STATUS['decks'].select { |d| d['name'] == deck }) : STATUS }
     app.set :decks, Workbench::Decks.new(status: status, deck_names: -> { ['呪術廻戦', 'Kaishi 1.5k', 'Takoboto Various'] })
     app.set :preferences, Workbench::Preferences.new(File.join(@dir, 'prefs.yaml'))
+    app.set :state, Workbench::State.new(File.join(@dir, 'state.yaml'))
     app.set :runner, @runner
     app.set :anki_up, -> { true }
   end
@@ -194,6 +195,11 @@ class AppTest < Minitest::Test
   def test_backup_info
     get '/api/backup'
     assert_includes body.keys, 'last'
+
+    time = Time.iso8601('2026-10-21T09:00:00+09:00')
+    app.state.last_backup = time
+    get '/api/backup'
+    assert_equal time, Time.iso8601(body['last'])
   end
 
   def test_backup_needs_anki_closed

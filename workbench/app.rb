@@ -10,6 +10,7 @@ require_relative 'decks'
 require_relative 'log'
 require_relative 'preferences'
 require_relative 'runner'
+require_relative 'state'
 require_relative 'steps'
 require_relative 'summary'
 require_relative '../lib/anki_connect'
@@ -29,6 +30,7 @@ module Workbench
     # Swappable in tests.
     set :decks, Decks.new
     set :preferences, Preferences.new
+    set :state, State.new
     set :runner, Runner.new
     # The sentences file's mtime when a run last wrote it to Anki, so the page
     # stops offering to write the same sentences again.
@@ -199,14 +201,17 @@ module Workbench
     end
 
     get '/api/backup' do
-      json(Backup.info)
+      json(Backup.info(settings.state))
     end
 
     # Runs backup-collection.sh, as a run, once Anki is closed.
     post '/api/backup' do
       json({ error: Backup::CLOSE_FIRST }, 409) if anki_up?
 
-      json(settings.runner.start(Backup.plan).to_h, 201)
+      run = settings.runner.start(Backup.plan) do |finished|
+        settings.state.last_backup = Time.now if finished.status == 'succeeded'
+      end
+      json(run.to_h, 201)
     end
 
     # The run in progress, else the latest one, so a reloaded page can pick it up.

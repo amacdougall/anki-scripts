@@ -7,7 +7,8 @@ module Workbench
   # Collection backups. backup-collection.sh needs Anki closed (so the
   # collection is flushed), and closing and reopening Anki is left to the
   # person: the Back up button only runs the script once AnkiConnect has
-  # stopped answering. The last backup is the newest snapshot in backups/.
+  # stopped answering. The last backup is the one recorded in the state file,
+  # else the newest snapshot in backups/.
   module Backup
     ROOT = File.expand_path('..', __dir__)
     SCRIPT = File.join(ROOT, 'backup-collection.sh')
@@ -16,12 +17,12 @@ module Workbench
 
     module_function
 
-    def last(dir = File.join(ROOT, 'backups'))
-      Dir.glob(File.join(dir, 'collection-backup-*.anki2')).map { |f| File.mtime(f) }.max
+    def last(state, dir = File.join(ROOT, 'backups'))
+      state.last_backup || Dir.glob(File.join(dir, 'collection-backup-*.anki2')).map { |f| File.mtime(f) }.max
     end
 
-    def info
-      { last: last&.iso8601 }
+    def info(state)
+      { last: last(state)&.iso8601 }
     end
 
     # A plan the runner can run like any step's.
