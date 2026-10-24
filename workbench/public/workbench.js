@@ -150,6 +150,9 @@ function renderBackup() {
   const text = $('backup-text');
   text.textContent = `Last backup: ${state.backup ? backupText() : '…'}`;
   text.className = state.backup && backupStale() ? 'stale' : '';
+  const message = $('backup-message');
+  message.textContent = state.backupMessage || '';
+  message.hidden = !state.backupMessage;
   $('backup-button').disabled = running();
 }
 
@@ -311,11 +314,6 @@ function renderStep() {
 
   parts.push(`<div class="command"><div class="section-label">Command</div><div class="command-box" id="command"></div></div>`);
 
-  if (state.backupMessage) {
-    parts.push(`<div class="note warn" role="note"><span>${h(state.backupMessage)}</span><button type="button" class="btn" data-action="backup"${running() ? ' disabled' : ''}>Back up</button></div>`);
-  } else if (s.bulk && state.backup && backupStale()) {
-    parts.push(`<div class="note warn" role="note"><span>This step can change many cards, and the last backup was ${h(backupText())}. Backing up needs Anki closed for a moment.</span><button type="button" class="btn" data-action="backup"${running() ? ' disabled' : ''}>Back up now</button></div>`);
-  }
 
   parts.push(resultNote());
   parts.push(`<div class="actions" id="actions"></div>`);
@@ -544,9 +542,9 @@ async function loadStatus() {
     state.anki = false;
   }
   renderAnki();
-  if (state.anki && !was && state.backupMessage && state.config) {
+  if (state.anki && !was && state.backupMessage) {
     state.backupMessage = null;
-    renderStep();
+    renderBackup();
   }
 }
 
@@ -671,7 +669,6 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'write': startRun({ phase: 'write' }); break;
       case 'again': if (state.lastRequest) api('/api/runs', { body: state.lastRequest }).then(follow).catch((err) => appendLog({ text: err.message, kind: 'err' })); break;
       case 'cancel': if (state.run) api(`/runs/${state.run.id}/cancel`, { method: 'POST' }); break;
-      case 'backup': startBackup(); break;
       case 'preset': {
         const note = summary().step_notes[state.stepId];
         Object.assign(values(), note.preset);
@@ -695,7 +692,7 @@ async function startBackup() {
     follow(await api('/api/backup', { method: 'POST' }));
   } catch (e) {
     state.backupMessage = e.message;
-    renderStep();
+    renderBackup();
     loadStatus();
   }
 }

@@ -30,7 +30,7 @@ module Workbench
     end
 
     Step = Struct.new(:id, :label, :group, :description, :scripts, :options, :checks, :deps,
-                      :dry_run, :bulk, :optional, :info, keyword_init: true) do
+                      :dry_run, :optional, :info, keyword_init: true) do
       def option(key)
         options.find { |o| o.key == key }
       end
@@ -82,7 +82,7 @@ module Workbench
         scripts: [], options: []
       ),
       Step.new(
-        id: 'takoboto', label: 'Pull from Takoboto', group: :in, bulk: true,
+        id: 'takoboto', label: 'Pull from Takoboto', group: :in,
         description: 'Takes the words from a Takoboto deck and adds them to the target deck as new Kaishi cards, ' \
                      'with readings and meanings looked up fresh (via add-cards.rb).',
         scripts: single('pull', 'pull-from-takoboto.rb'),
@@ -97,7 +97,7 @@ module Workbench
         ]
       ),
       Step.new(
-        id: 'word_list', label: 'Add from word list', group: :in, dry_run: true, bulk: true,
+        id: 'word_list', label: 'Add from word list', group: :in, dry_run: true,
         description: 'Adds every word in a YAML file. Only the word is required; readings and meanings come from ' \
                      'JMdict, with an LLM fallback. Put word lists in temp/.',
         scripts: single('add', 'add-cards.rb'),
@@ -114,7 +114,7 @@ module Workbench
         options: [limit]
       ),
       Step.new(
-        id: 'sentences', label: 'Example sentences', group: :fill, checks: %w[sentence], dry_run: true, bulk: true,
+        id: 'sentences', label: 'Example sentences', group: :fill, checks: %w[sentence], dry_run: true,
         description: 'Writes an example sentence for each word that lacks one, as a round trip through YAML so ' \
                      'you can read or edit the sentences before they reach Anki. Dry run previews writing the ' \
                      'sentences already in temp/example-sentences.yaml.',
@@ -135,7 +135,7 @@ module Workbench
         ]
       ),
       Step.new(
-        id: 'meanings', label: 'Add meanings', group: :fill, checks: %w[word_meaning], dry_run: true, bulk: true,
+        id: 'meanings', label: 'Add meanings', group: :fill, checks: %w[word_meaning], dry_run: true,
         description: 'Fills an empty Word Meaning from JMdict, with an LLM fallback for words JMdict lacks.',
         scripts: single('meanings', 'add-meanings.rb'),
         options: [provider(TRANSLATION_PROVIDERS), model(:word_meaning), limit,
@@ -143,7 +143,7 @@ module Workbench
       ),
       Step.new(
         id: 'sentence_meanings', label: 'Sentence meanings', group: :fill, checks: %w[sentence_meaning],
-        deps: %w[sentences], dry_run: true, bulk: true,
+        deps: %w[sentences], dry_run: true,
         description: "Translates example sentences that have no English yet. The deck's translation notes " \
                      '(prompts/translation/<deck>.md) are added to the prompt when present.',
         scripts: single('sentence_meanings', 'add-sentence-meanings.rb'),
@@ -152,7 +152,7 @@ module Workbench
       ),
       Step.new(
         id: 'furigana', label: 'Furigana', group: :fill, checks: %w[furigana furigana_review],
-        deps: %w[strip_html sentences], dry_run: true, bulk: true,
+        deps: %w[strip_html sentences], dry_run: true,
         description: 'Writes furigana for the word and sentence with MeCab, then has an LLM check the sentence ' \
                      'readings in context, with JMdict readings and the deck’s name readings as hints.',
         scripts: single('furigana', 'generate-furigana.rb'),
@@ -169,7 +169,7 @@ module Workbench
       ),
       Step.new(
         id: 'pitch_accent', label: 'Pitch accent', group: :fill, checks: %w[pitch_accent], deps: %w[strip_html],
-        dry_run: true, bulk: true,
+        dry_run: true,
         description: 'Draws the pitch-accent diagram from Wadoku’s data. Words Wadoku can’t cover are tagged ' \
                      'pitch-accent::unavailable and don’t count as missing.',
         scripts: single('pitch', 'generate-pitch-accent.rb'),
@@ -177,20 +177,20 @@ module Workbench
       ),
       Step.new(
         id: 'grammar_notes', label: 'Grammar notes', group: :fill, checks: %w[grammar_notes], deps: %w[strip_html],
-        dry_run: true, bulk: true,
+        dry_run: true,
         description: 'Appends short JMdict grammar notes (part of speech, usage) to the Notes field.',
         scripts: single('grammar', 'add-jmdict-grammar-notes.rb'),
         options: [limit, force('Re-process notes already done')]
       ),
       Step.new(
-        id: 'sort', label: 'Sort by frequency', group: :fill, optional: true, dry_run: true, bulk: true,
+        id: 'sort', label: 'Sort by frequency', group: :fill, optional: true, dry_run: true,
         description: 'Reorders the deck’s unseen cards so the most common words come up first, by word frequency.',
         scripts: single('sort', 'sort-new-by-word-frequency.rb'),
         options: []
       ),
       Step.new(
         id: 'audio', label: 'Generate audio', group: :fill, checks: %w[word_audio sentence_audio],
-        deps: %w[sentences furigana], dry_run: true, bulk: true,
+        deps: %w[sentences furigana], dry_run: true,
         description: 'Generates word and sentence audio with Gemini TTS, then checks each clip’s reading with ' \
                      'Whisper. Clips Gemini’s content filter blocks fall back to VOICEVOX when its server is running.',
         scripts: single('audio', 'generate-gemini-audio.rb'),

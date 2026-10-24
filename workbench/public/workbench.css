@@ -76,6 +76,7 @@ h2 { font-size: 16px; }
 .anki-status.down .text { color: var(--bad); }
 .backup-status { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .backup-status .stale { color: var(--todo-text); font-weight: 500; }
+.backup-status .message { max-width: 360px; color: var(--todo-text); }
 
 select, input[type=number], input[type=text] {
   min-height: 40px; padding: 0 10px; border: 1px solid var(--control-border); border-radius: 6px;
