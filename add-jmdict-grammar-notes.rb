@@ -9,6 +9,8 @@ require_relative 'lib/jmdict'
 # markers earlier runs wrote, so those notes aren't reprocessed.
 GRAMMAR_TAG = DeckStatus::GRAMMAR_TAG
 
+GRAMMAR_SEPARATOR = '、'
+
 # Strip ruby tags from text, keeping only the base characters (not furigana)
 # e.g., "<ruby>食<rt>た</rt></ruby>べる" => "食べる"
 def strip_ruby_tags(text)
@@ -17,8 +19,8 @@ def strip_ruby_tags(text)
 end
 
 # Derive grammar note labels from a JMdict entry. Reads JMdict's part-of-speech
-# and misc codes (e.g. "vt", "adj-na", "on-mim") rather than jisho.org's English
-# labels, but produces the same output strings as before.
+# and misc codes (e.g. "vt", "adj-na", "on-mim") and labels them with Japanese
+# grammar terms, using school-grammar names for adjectives (形容動詞 / 形容詞).
 def extract_grammar_notes(entry)
   return [] unless entry
 
@@ -36,38 +38,39 @@ def extract_grammar_notes(entry)
   # Suru verbs (noun + suru verb)
   if has_noun && has_suru
     if has_transitive
-      notes << 'vt.する'
+      notes << '他動詞（する）'
     elsif has_intransitive
-      notes << 'vi.する'
+      notes << '自動詞（する）'
     end
   elsif has_transitive && !has_suru
     # Regular transitive verb
-    notes << 'vt.'
+    notes << '他動詞'
   elsif has_intransitive && !has_suru
     # Regular intransitive verb
-    notes << 'vi.'
+    notes << '自動詞'
   end
 
   # Adjectives
-  notes << 'な adj.' if pos.include?('adj-na')
-  notes << 'い adj.' if pos.include?('adj-i')
+  notes << '形容動詞' if pos.include?('adj-na')
+  notes << '形容詞' if pos.include?('adj-i')
 
-  # Adverbs
-  notes << 'と adv.' if pos.include?('adv-to')
-  notes << 'に adv.' if pos.include?('adv') && !pos.include?('adv-to')
+  # Adverbs. Plain "adv" says nothing about which particle (if any) follows.
+  notes << '副詞（と）' if pos.include?('adv-to')
+  notes << '副詞' if pos.include?('adv') && !pos.include?('adv-to')
 
   # Counter
-  notes << 'Counter' if pos.include?('ctr')
+  notes << '助数詞' if pos.include?('ctr')
 
   # Prefix/Suffix
-  notes << 'Prefix' if pos.include?('pref')
-  notes << 'Suffix' if pos.include?('suf')
+  notes << '接頭辞' if pos.include?('pref')
+  notes << '接尾辞' if pos.include?('suf')
 
-  # Special tags
-  notes << 'Onomatopoeia' if misc.include?('on-mim')
-  notes << 'Honorific' if misc.include?('hon')
-  notes << 'Humble' if misc.include?('hum')
-  notes << 'Polite' if misc.include?('pol')
+  # Special tags. JMdict's single "on-mim" code doesn't separate 擬音語 from
+  # 擬態語, so オノマトペ covers both.
+  notes << 'オノマトペ' if misc.include?('on-mim')
+  notes << '尊敬語' if misc.include?('hon')
+  notes << '謙譲語' if misc.include?('hum')
+  notes << '丁寧語' if misc.include?('pol')
 
   notes
 end
@@ -82,7 +85,7 @@ def update_note_with_grammar(db, note_id, grammar_notes, existing_notes)
     return false unless note
 
     fields = note[:fields]
-    grammar_text = grammar_notes.join(', ')
+    grammar_text = grammar_notes.join(GRAMMAR_SEPARATOR)
     fields[Kaishi::NOTES_IDX] = if existing_notes.strip.empty?
                                   grammar_text
                                 else
@@ -159,7 +162,7 @@ def main
             update_note_with_grammar(db, note[:id], [], existing_notes)
           end
         else
-          puts "  Adding: #{grammar_notes.join(', ')}"
+          puts "  Adding: #{grammar_notes.join(GRAMMAR_SEPARATOR)}"
 
           unless options[:dry_run]
             # Update note

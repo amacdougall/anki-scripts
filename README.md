@@ -258,7 +258,7 @@ In almost every case, run:
 | `add-sentence-meanings.rb` | Translates sentences that have no English yet. |
 | `generate-furigana.rb` | Writes furigana for the word and sentence with MeCab, then has an LLM check the sentence readings in context. MeCab gives each word one reading regardless of context (身体 as しんたい where the sentence means からだ); the review catches these, with JMdict's readings as a reference. |
 | `generate-pitch-accent.rb` | Draws the pitch-accent diagram from Wadoku's data. (You'll want to enable pitch accent display in the Kaishi note template or this will have no visible effect.) Words Wadoku doesn't know are tagged `pitch-accent::unavailable` and left as gaps; the audio carries pitch too. `--force` retries them. |
-| `add-jmdict-grammar-notes.rb` | Adds short grammar notes from JMdict to the Notes field: transitive or intransitive, な/い adjective, counter, onomatopoeia, honorific, and so on. |
+| `add-jmdict-grammar-notes.rb` | Adds short grammar notes from JMdict to the Notes field, in Japanese: 他動詞 or 自動詞, 形容動詞 or 形容詞, 助数詞, オノマトペ, 尊敬語, and so on. |
 
 `--provider` takes `claude` (the default) or `opencode`; the meaning scripts
 also take `google`. OpenCode is pay-per-use, so it suits big batches that would
