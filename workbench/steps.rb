@@ -76,6 +76,12 @@ module Workbench
 
     ALL = [
       Step.new(
+        id: 'stats', label: 'Deck stats', group: :overview, info: true,
+        description: 'Anki’s card counts for every deck with Kaishi cards: new, learning, young and mature ' \
+                     '(an interval of 21 days or more). Counted fresh each time you open this.',
+        scripts: [], options: []
+      ),
+      Step.new(
         id: 'mined', label: 'Mined cards', group: :in, info: true,
         description: 'Reader tools (Yomitan, HoshiReader, Calibre) create Kaishi 1.5k notes directly in a deck ' \
                      'as you read. Nothing to run here: once cards arrive, start with Strip HTML and Add meanings.',

@@ -177,6 +177,49 @@ table.mapping thead tr { background: var(--surface-alt); }
 table.mapping tbody tr { border-top: 1px solid var(--border-soft); }
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
 
+/* --- Deck stats --- */
+
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.stat-tile { background: var(--surface-alt); border-radius: 8px; padding: 12px 14px; }
+.stat-label { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.stat-value { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.stat-sub { font-size: 12px; color: var(--muted); }
+
+.stat-bar { display: flex; gap: 2px; height: 10px; border-radius: 3px; overflow: hidden; background: var(--border-soft); }
+.stat-bar .seg { flex-basis: 0; min-width: 2px; }
+.seg.new, .swatch.new { background: var(--accent); }
+.seg.learning, .swatch.learning { background: #D08A2E; }
+.seg.young, .swatch.young { background: #7CC09E; }
+.seg.mature, .swatch.mature { background: var(--go); }
+.stat-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--muted); margin-top: -10px; }
+.stat-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; }
+
+table.stats { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 600px; }
+table.stats th, table.stats td { padding: 6px 10px; text-align: left; font-weight: 400; }
+table.stats thead th { background: var(--surface-alt); font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px; }
+table.stats tbody tr, table.stats tfoot tr { border-top: 1px solid var(--border-soft); }
+table.stats tfoot { font-weight: 600; }
+table.stats tfoot th { font-weight: 600; padding: 10px; }
+table.stats tr.selected { background: var(--accent-bg); }
+table.stats .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.stats td.minor { color: var(--muted); }
+table.stats tbody th { white-space: nowrap; }
+table.stats button.sort {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 0; border: none; background: none;
+  color: inherit; font: inherit; cursor: pointer;
+}
+table.stats button.sort:hover, table.stats button.sort.active { color: var(--text); }
+table.stats .arrow { display: inline-block; width: 0.8em; text-align: center; }
+table.stats th.num button.sort { flex-direction: row-reverse; }
+table.stats .bar-cell { width: 100%; min-width: 120px; padding-right: 16px; }
+table.stats button.link {
+  min-height: 32px; padding: 0; border: none; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+table.stats button.link:hover { color: var(--accent); text-decoration: underline; }
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
 /* --- Output --- */
 
 .output { padding: 0; overflow: hidden; }

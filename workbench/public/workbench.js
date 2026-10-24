@@ -17,6 +17,9 @@ const state = {
   lastRequest: null, // the last POST /api/runs body, for "Run again"
   sentences: null, // /api/sentences
   backup: null, // /api/backup
+  stats: null, // /api/stats, or { error }
+  statsLoading: false,
+  statsSort: { key: remembered('statsSort', 'name'), desc: remembered('statsSortDesc', 'false') === 'true' },
   backupMessage: null, // "close Anki first" or "reopen Anki", until Anki is back
   anki: null
 };
@@ -161,6 +164,7 @@ function renderBackup() {
 function renderSteps() {
   const sum = summary();
   const groups = [
+    { id: 'overview', title: 'Overview', sub: 'Anki’s own card counts' },
     { id: 'in', title: 'Get words in', sub: 'Whichever route the words took' },
     { id: 'fill', title: 'Fill in cards', sub: 'Suggested order. Any step can run any time.' }
   ];
@@ -184,6 +188,7 @@ function renderSteps() {
 // --- Selected step ---
 
 function scriptLabel(s) {
+  if (s.id === 'stats') return 'deck-status.rb --stats';
   if (s.id === 'mined') return 'Yomitan · HoshiReader · Calibre';
   if (s.id === 'takoboto') return 'pull-from-takoboto.rb → add-cards.rb';
   return s.scripts.map((x) => x.path).join(' → ');
@@ -256,6 +261,95 @@ function miningTable() {
     </table></div></div>`;
 }
 
+// --- Deck stats ---
+
+// The server also counts suspended cards; the page leaves them out.
+const STAT_STATES = [
+  { key: 'new', label: 'New' },
+  { key: 'learning', label: 'Learning' },
+  { key: 'young', label: 'Young' },
+  { key: 'mature', label: 'Mature' }
+];
+
+function percent(n, total) { return total ? Math.round((n / total) * 100) : 0; }
+
+// One bar split by card state, in STAT_STATES order.
+function statBar(counts) {
+  const segments = STAT_STATES.filter((st) => counts[st.key])
+    .map((st) => `<div class="seg ${st.key}" style="flex-grow: ${counts[st.key]}"></div>`).join('');
+  const label = STAT_STATES.map((st) => `${counts[st.key]} ${st.label.toLowerCase()}`).join(', ');
+  return `<div class="stat-bar" role="img" aria-label="${h(label)}">${segments}</div>`;
+}
+
+// The decks in the table's current order. Ties fall back to deck name.
+function sortedStatDecks(decks) {
+  const { key, desc } = state.statsSort;
+  const byName = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  return [...decks].sort((a, b) => {
+    const order = key === 'name' ? byName(a, b) : (a[key] - b[key]) || -byName(a, b);
+    return desc ? -order : order;
+  });
+}
+
+// Clicking a header sorts by it: numbers largest first, names A to Z; again reverses.
+function sortStats(key) {
+  const sort = state.statsSort;
+  state.statsSort = sort.key === key ? { key, desc: !sort.desc } : { key, desc: key !== 'name' };
+  remember('statsSort', state.statsSort.key);
+  remember('statsSortDesc', String(state.statsSort.desc));
+  renderStep();
+}
+
+function statsView() {
+  const st = state.stats;
+  if (!st) return '<div class="empty">Counting cards…</div>';
+  if (st.error) return `<div class="note bad"><strong>Couldn’t count the cards</strong>${h(st.error)}</div>`;
+  if (!st.decks.length) return '<div class="empty">No Kaishi cards yet.</div>';
+
+  const t = st.totals;
+  const tile = (label, value, sub) => `<div class="stat-tile"><div class="stat-label">${label}</div><div class="stat-value">${value}</div>${sub ? `<div class="stat-sub">${sub}</div>` : ''}</div>`;
+  const tiles = `<div class="stat-tiles">
+    ${tile('Total', t.total, `${st.decks.length} decks`)}
+    ${tile('New', t.new, `${percent(t.new, t.total)}% of cards`)}
+    ${tile('Mature', t.mature, `${percent(t.mature, t.total)}% of cards`)}
+  </div>`;
+  const legend = `<div class="stat-legend">${STAT_STATES.map((s) => `<span><span class="swatch ${s.key}" aria-hidden="true"></span>${s.label}</span>`).join('')}</div>`;
+
+  const cell = (n, key) => `<td class="num${['learning', 'young'].includes(key) ? ' minor' : ''}">${n || (key === 'total' ? 0 : '–')}</td>`;
+  const row = (d) => `<tr${d.name === state.deck ? ' class="selected"' : ''}>
+      <th scope="row"><button type="button" class="link" data-deck="${h(d.name)}">${h(d.name)}</button></th>
+      ${STAT_STATES.map((s) => cell(d[s.key], s.key)).join('')}${cell(d.total, 'total')}
+      <td class="bar-cell">${statBar(d)}</td></tr>`;
+  const header = (key, label, cls = '') => {
+    const sort = state.statsSort;
+    const active = sort.key === key;
+    const aria = active ? ` aria-sort="${sort.desc ? 'descending' : 'ascending'}"` : '';
+    const arrow = active ? (sort.desc ? '↓' : '↑') : '';
+    return `<th scope="col" class="${cls}"${aria}><button type="button" class="sort${active ? ' active' : ''}" data-sort="${key}">${label}<span class="arrow" aria-hidden="true">${arrow}</span></button></th>`;
+  };
+  const table = `<div class="table-wrap"><table class="stats">
+      <thead><tr>${header('name', 'Deck')}${STAT_STATES.map((s) => header(s.key, s.label, 'num')).join('')}${header('total', 'Total', 'num')}<th scope="col" class="bar-cell"><span class="visually-hidden">Breakdown</span></th></tr></thead>
+      <tbody>${sortedStatDecks(st.decks).map(row).join('')}</tbody>
+      <tfoot><tr><th scope="row">All decks</th>${STAT_STATES.map((s) => cell(t[s.key], s.key)).join('')}${cell(t.total, 'total')}<td class="bar-cell">${statBar(t)}</td></tr></tfoot>
+    </table></div>`;
+
+  return `${tiles}${statBar(t)}${legend}${table}
+    <div class="actions"><button type="button" class="btn-secondary" data-action="stats"${state.statsLoading ? ' disabled' : ''}>${state.statsLoading ? 'Counting…' : 'Count again'}</button>
+    <span class="hint">Click a deck to make it the target deck.</span></div>`;
+}
+
+async function loadStats() {
+  state.statsLoading = true;
+  if (state.stepId === 'stats') renderStep();
+  try {
+    state.stats = await api('/api/stats');
+  } catch (e) {
+    state.stats = { error: e.message };
+  }
+  state.statsLoading = false;
+  if (state.stepId === 'stats') renderStep();
+}
+
 // The generated sentences waiting for this deck, if any.
 function pendingSentences() {
   const sn = state.sentences;
@@ -297,7 +391,7 @@ function renderStep() {
   }
 
   if (s.info) {
-    parts.push(miningTable());
+    parts.push(s.id === 'stats' ? statsView() : miningTable());
     $('step').innerHTML = parts.join('');
     return;
   }
@@ -313,7 +407,6 @@ function renderStep() {
   }
 
   parts.push(`<div class="command"><div class="section-label">Command</div><div class="command-box" id="command"></div></div>`);
-
 
   parts.push(resultNote());
   parts.push(`<div class="actions" id="actions"></div>`);
@@ -570,6 +663,7 @@ function selectStep(id, preset) {
   renderSteps();
   renderStep();
   schedulePreview();
+  if (id === 'stats') loadStats();
 }
 
 function selectDeck(name) {
@@ -601,6 +695,7 @@ async function init() {
   const savedStep = remembered('step', null);
   state.stepId = (savedStep && step(savedStep)) ? savedStep : (summary().suggested || 'mined');
   renderAll();
+  if (state.stepId === 'stats') loadStats();
   try {
     const { run } = await api('/api/runs/current');
     if (run && run.status === 'running') follow(run);
@@ -661,6 +756,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   stepEl.addEventListener('click', (e) => {
+    const sortButton = e.target.closest('[data-sort]');
+    if (sortButton) { sortStats(sortButton.dataset.sort); return; }
+    const deckButton = e.target.closest('[data-deck]');
+    if (deckButton) { selectDeck(deckButton.dataset.deck); return; }
     const button = e.target.closest('[data-action]');
     if (!button || button.disabled) return;
     switch (button.dataset.action) {
@@ -668,6 +767,7 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'dry': startRun({ dry_run: true }); break;
       case 'write': startRun({ phase: 'write' }); break;
       case 'again': if (state.lastRequest) api('/api/runs', { body: state.lastRequest }).then(follow).catch((err) => appendLog({ text: err.message, kind: 'err' })); break;
+      case 'stats': loadStats(); break;
       case 'cancel': if (state.run) api(`/runs/${state.run.id}/cancel`, { method: 'POST' }); break;
       case 'preset': {
         const note = summary().step_notes[state.stepId];

@@ -8,9 +8,14 @@
 #
 # --json also lists the decks holding Takoboto notes (takoboto_decks), the
 # source decks pull-from-takoboto.rb can pull from.
+#
+# --stats reports Anki's own card counts instead (new, learning, young, mature,
+# suspended; lib/deck_stats.rb), for every deck with Kaishi cards, the curated
+# deck included.
 
 require 'json'
 require_relative 'lib/script_cli'
+require_relative 'lib/deck_stats'
 require_relative 'lib/deck_status'
 
 TAKOBOTO_NOTE_TYPE = 'jp.takoboto'
@@ -23,13 +28,42 @@ cli = ScriptCLI.new(
 )
 options = cli.options
 options[:json] = false
+options[:stats] = false
 cli.on('--json', 'Print JSON (for other tools) instead of a report') { options[:json] = true }
+cli.on('--stats', 'Report new/learning/young/mature/suspended card counts instead') { options[:stats] = true }
 cli.parse!
 
 db = cli.connect!(quiet: true)
 
+def print_stats(db, deck, json:)
+  decks = DeckStats.by_deck(db)
+  decks = decks.select { |d| d[:name] == deck || d[:name].start_with?("#{deck}::") } if deck
+  totals = DeckStats.totals(decks)
+  if json
+    puts JSON.pretty_generate(decks: decks, totals: totals)
+    return
+  end
+
+  # Deck names are mostly Japanese, and full-width characters take two columns.
+  display_width = ->(text) { text.each_char.sum { |c| c.ord >= 0x1100 ? 2 : 1 } }
+  columns = %i[new learning young mature suspended total]
+  width = [*decks.map { |d| display_width.call(d[:name]) }, 5].max
+  row = lambda do |name, counts|
+    puts name + (' ' * (width - display_width.call(name))) + format(' %9s' * columns.size, *columns.map { |c| counts[c] })
+  end
+  row.call('', columns.to_h { |c| [c, c.to_s.capitalize] })
+  decks.each { |d| row.call(d[:name], d) }
+  row.call('Total', totals) if decks.size > 1
+  puts 'No Kaishi cards found.' if decks.empty?
+end
+
 begin
   deck = options[:target_deck]
+  if options[:stats]
+    print_stats(db, deck, json: options[:json])
+    exit ScriptCLI::EXIT_OK
+  end
+
   notes = db.notes_in_deck_with_deck(deck, note_type: Kaishi::NOTE_TYPE_NAME,
                                            exclude_deck: deck ? nil : ScriptCLI::CURATED_DECK)
   by_deck = deck ? { deck => notes } : notes.group_by { |note| note[:deck] }

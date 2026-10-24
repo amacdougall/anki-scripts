@@ -14,6 +14,7 @@ require_relative 'state'
 require_relative 'steps'
 require_relative 'summary'
 require_relative '../lib/anki_connect'
+require_relative '../lib/deck_stats'
 require_relative '../lib/llm_config'
 
 module Workbench
@@ -36,6 +37,7 @@ module Workbench
     # stops offering to write the same sentences again.
     set :sentences_written, {}
     set :anki_up, -> { AnkiConnect.new.version && true }
+    set :deck_stats, -> { DeckStats.by_deck(AnkiConnect.new.connect) }
     set :anki_was_up, nil
 
     before do
@@ -48,6 +50,12 @@ module Workbench
     end
 
     helpers do
+      # A public file's URL, versioned by its mtime so the browser picks up an
+      # edited copy instead of a cached one.
+      def asset_path(name)
+        "/#{name}?v=#{File.mtime(File.join(settings.public_folder, name)).to_i}"
+      end
+
       def json(data, status = 200)
         content_type :json
         halt status, JSON.generate(data)
@@ -144,6 +152,14 @@ module Workbench
     get '/api/decks/:name' do
       entry = decks.refresh(params['name'])
       json(entry: entry, summary: summary(entry, decks.all), takoboto_decks: decks.all['takoboto_decks'])
+    end
+
+    # Anki's card counts (new, learning, young, mature, suspended) for every
+    # deck with Kaishi cards, and their totals. Quick, so never cached: they
+    # change as soon as you review.
+    get '/api/stats' do
+      decks = settings.deck_stats
+      json(decks: decks, totals: DeckStats.totals(decks))
     end
 
     get '/api/config' do

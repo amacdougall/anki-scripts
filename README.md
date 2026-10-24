@@ -89,7 +89,8 @@ named `Kaishi 1.5k` is refused, since it's already complete.
 still need each step (an example sentence, furigana, audio...) and the script
 that does it. The counts use the same checks as the scripts, so they're exactly
 what a run would process. Add `--target-deck` for one deck, or `--json` for
-other tools.
+other tools. `--stats` instead shows Anki's own card counts per deck (new,
+learning, young, mature, suspended), as does the Workbench's Deck stats view.
 
 **They only fill in what's missing.** Each script skips cards that already have
 the field it writes, so re-running is safe and cheap. `--force` regenerates
@@ -361,6 +362,7 @@ per deck:
 
 ```sh
 ./deck-status.rb          # what each deck still needs (see How the scripts work)
+./deck-status.rb --stats  # new / young / mature card counts per deck
 ./backup-collection.sh    # snapshot the collection (quit Anki first)
 ./export-seen-words.rb    # every word you've studied, for the curious
 ```

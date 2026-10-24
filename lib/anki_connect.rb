@@ -188,6 +188,11 @@ class AnkiConnect
     invoke('findCards', query: query)
   end
 
+  # { deck name => [card ids] } for the given cards.
+  def decks_for_cards(card_ids)
+    invoke('getDecks', cards: card_ids)
+  end
+
   # Returns [{ card_id:, note_id:, interval:, due:, deck:, fields: [ordered
   # array] }] for a card search query (e.g. 'deck:"日本語の言葉" prop:ivl>=21').
   def cards_info(query)

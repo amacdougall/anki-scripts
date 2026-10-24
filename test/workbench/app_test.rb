@@ -63,6 +63,7 @@ class AppTest < Minitest::Test
     app.set :state, Workbench::State.new(File.join(@dir, 'state.yaml'))
     app.set :runner, @runner
     app.set :anki_up, -> { true }
+    app.set :deck_stats, -> { [{ name: '呪術廻戦', total: 10, new: 2, learning: 1, young: 3, mature: 4, suspended: 0 }] }
   end
 
   def teardown
@@ -130,10 +131,23 @@ class AppTest < Minitest::Test
     assert_match(/AnkiConnect/, body['error'])
   end
 
+  def test_stats
+    get '/api/stats'
+    assert_equal ['呪術廻戦'], body['decks'].map { |d| d['name'] }
+    assert_equal 4, body['totals']['mature']
+    assert_equal 10, body['totals']['total']
+  end
+
+  def test_stats_error_when_anki_is_down
+    app.set :deck_stats, -> { raise AnkiConnect::NotRunningError, 'Cannot reach AnkiConnect' }
+    get '/api/stats'
+    assert_equal 503, last_response.status
+  end
+
   def test_config
     get '/api/config'
     steps = body['steps']
-    assert_equal 'mined', steps.first['id']
+    assert_equal 'stats', steps.first['id']
     sentences = steps.find { |s| s['id'] == 'sentences' }
     assert_includes sentences['files']['instructions_file'], 'prompts/example-sentence-instructions.md'
     assert_equal 'claude', body['llm']['default_provider']
