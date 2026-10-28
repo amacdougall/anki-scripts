@@ -12,6 +12,18 @@ module GeminiTTS
       @model = model
     end
 
+    # Several takes of the same model played back to back, as one Result: PCM
+    # concatenated, token counts summed (so `cost` covers every take), and the
+    # first non-STOP finishReason if any take reported one.
+    def self.join(results)
+      usage = %w[promptTokenCount candidatesTokenCount].to_h do |key|
+        [key, results.sum { |r| r.usage.is_a?(Hash) ? r.usage[key].to_i : 0 }]
+      end
+      new(pcm: results.map { |r| r.pcm.b }.join,
+          finish_reason: results.map(&:finish_reason).find { |f| f != 'STOP' } || 'STOP',
+          usage: usage, model: results.first.model)
+    end
+
     def duration
       Audio.duration(pcm)
     end

@@ -288,7 +288,12 @@ This generates word and sentence audio for every card missing it, with Gemini
 text-to-speech. Each clip gets a random voice from a pool of standard Tokyo
 Japanese voices (tag a note `voice::male` or `voice::female` to choose). Words
 are spoken with the card's reading as a pronunciation hint, and deck name
-readings are applied first.
+readings are applied first. When a character speaks English mid-sentence
+(「Relax. It's just twenty minutes」), that part is spoken by an American English
+voice of the same gender and joined to the Japanese. A run counts as speech when
+it has two or more words, at least one of them a grammar word (I, it's, is, to,
+and...), so names, titles and loanwords (Black Box, 『The Baby-Sitters Club』,
+weekly sync, OK) stay in the Japanese voice.
 
 The Gemini voices are far better than anything else I've tried: natural,
 varied, and accurate enough to learn pitch accent from. They're well worth

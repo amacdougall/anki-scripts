@@ -60,6 +60,13 @@ MALE_VOICES = %w[
 
 VOICES = (MALE_VOICES + FEMALE_VOICES).freeze
 
+# English voices for runs of English inside a Japanese sentence (see
+# TtsText.language_segments), matched to the Japanese voice's gender. Catalogue
+# voices with accent "General American", picked from their descriptions for a
+# clear, even delivery; not yet auditioned.
+ENGLISH_FEMALE_VOICES = %w[aoede callirrhoe despina erinome kore sulafat].freeze
+ENGLISH_MALE_VOICES   = %w[achird charon iapetus rasalgethi sadaltager schedar].freeze
+
 # Delivery phrases, one picked at random per clip and slotted into the sentence
 # and word styles below. Aim for normal-speed speech (for listening practice):
 # "slowly" or "for a language learner" noticeably slows delivery (2026-09-26:
@@ -74,6 +81,10 @@ DELIVERY_PHRASES = [
 # never spoken; the text itself is read verbatim.
 def sentence_style
   "Speaking precise 標準語 #{DELIVERY_PHRASES.sample}."
+end
+
+def english_style
+  "Speaking natural American English #{DELIVERY_PHRASES.sample}."
 end
 
 # Words are generated in isolation, with the card's kana reading appended to the
@@ -141,6 +152,34 @@ def select_voice(note)
   when 'male'   then MALE_VOICES.sample
   else               VOICES.sample
   end
+end
+
+def english_runs?(text)
+  language_segments(text).any? { |lang, _| lang == :en }
+end
+
+# An English voice of the same gender as the Japanese `voice` (either gender if
+# the voice isn't in our pools, e.g. one read back from an old filename).
+def english_voice_for(voice)
+  if FEMALE_VOICES.include?(voice)  then ENGLISH_FEMALE_VOICES.sample
+  elsif MALE_VOICES.include?(voice) then ENGLISH_MALE_VOICES.sample
+  else (ENGLISH_FEMALE_VOICES + ENGLISH_MALE_VOICES).sample
+  end
+end
+
+# Generate `text` in `voice`, except that runs of two or more English words are
+# generated separately in `english_voice` and the takes joined in order. Text
+# without such a run is a single request, as before.
+def synthesize(client, text, voice:, english_voice:, style:)
+  return client.generate(text, voice: voice, style: style) unless english_runs?(text)
+
+  GeminiTTS::Result.join(language_segments(text).map do |lang, piece|
+    if lang == :en
+      client.generate(piece, voice: english_voice, style: english_style)
+    else
+      client.generate(piece, voice: voice, style: style)
+    end
+  end)
 end
 
 # Media filename referenced by an audio field ("[sound:x.wav]" => "x.wav").
@@ -305,8 +344,9 @@ begin
         stats[:word_generated] += 1 unless options[:check_existing]
       else
         existing = sound_file(w_audio) if options[:check_existing]
+        job_voice = voice_from_filename(existing) || voice
         note_jobs << { note_id: note_id, kind: 'word', field_idx: WORD_AUDIO_IDX,
-                       voice: voice_from_filename(existing) || voice, existing_file: existing,
+                       voice: job_voice, english_voice: english_voice_for(job_voice), existing_file: existing,
                        text: word_text, style: word_style(reading),
                        reading: (reading unless reading.empty?),
                        label: "#{prefix} #{word_text} (#{reading})" }
@@ -323,7 +363,8 @@ begin
         stats[:skipped_empty] += 1
         db.remove_tags(note_id, PENDING_TAGS['sent']) unless options[:dry_run]
       elsif options[:dry_run]
-        action = options[:check_existing] ? "would check #{sound_file(s_audio)}" : "would generate sentence audio (#{voice})"
+        voices = english_runs?(sent_text) ? "#{voice}, English: #{english_voice_for(voice)}" : voice
+        action = options[:check_existing] ? "would check #{sound_file(s_audio)}" : "would generate sentence audio (#{voices})"
         puts "#{prefix} #{truncate(sent_text)} — #{action} [DRY RUN]"
         stats[:sent_generated] += 1 unless options[:check_existing]
       else
@@ -340,8 +381,9 @@ begin
                       end
         segments = nil if skip_reason
         existing = sound_file(s_audio) if options[:check_existing]
+        job_voice = voice_from_filename(existing) || voice
         note_jobs << { note_id: note_id, kind: 'sent', field_idx: SENTENCE_AUDIO_IDX,
-                       voice: voice_from_filename(existing) || voice, existing_file: existing,
+                       voice: job_voice, english_voice: english_voice_for(job_voice), existing_file: existing,
                        text: sent_text, style: sentence_style, segments: segments, deck: note[:deck],
                        skip_reason: skip_reason,
                        label: "#{prefix} #{truncate(sent_text)}" }
@@ -436,7 +478,8 @@ begin
     if wav
       out = { result: nil, cost: 0.0, log: [], check: nil }
     else
-      result = client.generate(job[:text], voice: job[:voice], style: job[:style])
+      result = synthesize(client, job[:text], voice: job[:voice], english_voice: job[:english_voice],
+                          style: job[:style])
       out = { result: result, cost: result.cost.to_f, log: [], check: nil }
       out[:log] << "#{job[:existing_file]} missing from collection.media; generated a new take" if job[:existing_file]
       wav = result.to_wav
@@ -472,7 +515,8 @@ begin
 
       # The kana retry is accepted without a second check: kana pins the
       # reading down, and re-checking mostly measures Whisper's own noise.
-      retry_result = client.generate(retry_text, voice: job[:voice], style: job[:style])
+      retry_result = synthesize(client, retry_text, voice: job[:voice], english_voice: job[:english_voice],
+                                style: job[:style])
       out[:cost] += retry_result.cost.to_f
       out.merge(result: retry_result, check: :retried)
     rescue GeminiTTS::InsufficientBalanceError, GeminiTTS::RateLimitedError => e
@@ -560,7 +604,10 @@ begin
             state[:updated] = true
             state[:done_kinds] << job[:kind]
             stats[job[:kind] == 'word' ? :word_generated : :sent_generated] += 1
-            puts "#{job[:label]} — #{kind_name} audio generated (#{job[:voice]}#{suffix.empty? ? '' : ', kana retake'})"
+            details = [job[:voice]]
+            details << "English: #{job[:english_voice]}" if english_runs?(job[:text])
+            details << 'kana retake' unless suffix.empty?
+            puts "#{job[:label]} — #{kind_name} audio generated (#{details.join(', ')})"
           end
         else
           stat, desc = case error
