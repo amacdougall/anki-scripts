@@ -151,7 +151,8 @@ module Workbench
     # Re-counts one deck (after a run). entry is nil for a deck with no Kaishi cards.
     get '/api/decks/:name' do
       entry = decks.refresh(params['name'])
-      json(entry: entry, summary: summary(entry, decks.all), takoboto_decks: decks.all['takoboto_decks'])
+      all = decks.cached
+      json(entry: entry, summary: summary(entry, all), takoboto_decks: all['takoboto_decks'])
     end
 
     # Anki's card counts (new, learning, young, mature, suspended) for every
@@ -209,8 +210,9 @@ module Workbench
           settings.sentences_written[:mtime] = File.mtime(path) if File.exist?(path)
         end
 
-        # Pulling from Takoboto also changes the source deck, so recount everything.
-        finished.step_id == 'takoboto' ? decks.invalidate : decks.refresh(finished.deck)
+        # The page refreshes the run's deck itself. Pulling from Takoboto also
+        # changes the source deck, so drop the cache.
+        decks.invalidate if finished.step_id == 'takoboto'
       end
       settings.preferences.remember(plan.deck, plan.step, data['options'] || {}) unless plan.dry_run
       json(run.to_h, 201)

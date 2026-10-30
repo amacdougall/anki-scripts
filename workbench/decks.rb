@@ -9,7 +9,8 @@ require_relative 'log'
 module Workbench
   # Per-deck counts from `deck-status.rb --json`, so the CLI stays the source
   # of truth for what "missing" means. The whole collection takes a few
-  # seconds, so the result is cached; a finished run refreshes its own deck.
+  # seconds, so the result is cached; after a run the page refreshes just its
+  # deck.
   class Decks
     ROOT = File.expand_path('..', __dir__)
     TTL = 30 # seconds
@@ -40,6 +41,12 @@ module Workbench
         end
         @cache
       end
+    end
+
+    # The cached counts, however old (counting only if there are none): for
+    # answering alongside a one-deck refresh without recounting everything.
+    def cached
+      @mutex.synchronize { @cache } || all
     end
 
     # Re-counts one deck and folds it into the cache. Returns its entry

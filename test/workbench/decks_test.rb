@@ -40,6 +40,14 @@ class DecksTest < Minitest::Test
     assert_equal [nil, 'B'], @calls
     assert_equal [['A', 1], ['B', 0]], @decks.all['decks'].map { |d| [d['name'], d['needs_work']] }
   end
+
+  def test_cached_ignores_the_ttl
+    @decks.cached
+    @now = 31
+    @decks.refresh('B')
+    assert_equal [['A', 1], ['B', 0]], @decks.cached['decks'].map { |d| [d['name'], d['needs_work']] }
+    assert_equal [nil, 'B'], @calls
+  end
 end
 
 class PreferencesTest < Minitest::Test

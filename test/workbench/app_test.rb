@@ -123,6 +123,22 @@ class AppTest < Minitest::Test
     assert_equal '4 missing', body['summary']['badges']['sentences']['text']
   end
 
+  # After a long run the cache is older than its TTL; the one-deck refresh
+  # still mustn't recount every deck.
+  def test_one_deck_counts_only_that_deck
+    calls = []
+    now = 0
+    status = lambda do |deck|
+      calls << deck
+      deck ? STATUS.merge('decks' => STATUS['decks'].select { |d| d['name'] == deck }) : STATUS
+    end
+    app.set :decks, Workbench::Decks.new(status: status, deck_names: -> { ['呪術廻戦'] }, clock: -> { now })
+    get '/api/decks'
+    now = 600
+    get "/api/decks/#{URI.encode_www_form_component('呪術廻戦')}"
+    assert_equal [nil, '呪術廻戦'], calls
+  end
+
   def test_decks_error_when_anki_is_down
     app.set :decks, Workbench::Decks.new(status: ->(_) { raise Workbench::Decks::Error, 'Cannot reach AnkiConnect' },
                                          deck_names: -> { [] })

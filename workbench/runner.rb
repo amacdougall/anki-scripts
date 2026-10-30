@@ -12,7 +12,7 @@ module Workbench
   # run keeps its output in memory for the page (which follows it over
   # Server-Sent Events) and appends it to temp/workbench.log.
   #
-  #   run = runner.start(plan) { |finished| decks.refresh(finished.deck) }
+  #   run = runner.start(plan) { |finished| decks.invalidate }
   #   run.wait_for_lines(0) # => [[line, ...], finished?]
   class Runner
     ROOT = File.expand_path('..', __dir__)
