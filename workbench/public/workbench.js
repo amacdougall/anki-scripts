@@ -707,6 +707,15 @@ async function init() {
 document.addEventListener('DOMContentLoaded', () => {
   $('deck-select').addEventListener('change', (e) => selectDeck(e.target.value));
   $('backup-button').addEventListener('click', () => startBackup());
+
+  const themeSelect = $('theme-select');
+  themeSelect.value = remembered('theme', 'system');
+  themeSelect.addEventListener('change', (e) => {
+    const theme = e.target.value;
+    if (theme === 'system') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = theme;
+    remember('theme', theme);
+  });
   $('clear-output').addEventListener('click', () => { $('log').innerHTML = '<div class="log-empty">Run a step to see its output here.</div>'; });
 
   $('steps').addEventListener('click', (e) => {

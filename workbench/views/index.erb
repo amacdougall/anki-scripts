@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kaishi Workbench</title>
 <link rel="stylesheet" href="<%= asset_path('workbench.css') %>">
+<script>
+  // Apply the saved theme before first paint; workbench.js wires up the picker.
+  try { const t = localStorage.getItem('workbench.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) { /* private window */ }
+</script>
 <script src="<%= asset_path('workbench.js') %>" defer></script>
 </head>
 <body>
@@ -25,6 +29,14 @@
       <span id="backup-text">Last backup: …</span>
       <span id="backup-message" class="message" role="status" hidden></span>
       <button type="button" class="btn" id="backup-button">Back up</button>
+    </div>
+    <div class="theme-picker">
+      <label class="visually-hidden" for="theme-select">Theme</label>
+      <select id="theme-select">
+        <option value="system">System theme</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
     </div>
   </div>
 </header>
